@@ -20,7 +20,7 @@ const { sendClientCredentialsEmail } = require("../services/email");
 function createClientsRouter() {
   const router = express.Router();
 
-  router.use(requireAuth, requireStaff);
+  router.use("/api/clients", requireAuth, requireStaff);
 
   router.get("/api/clients", async (req, res) => {
     try {

@@ -15,7 +15,7 @@ const { nowUtcForCatalyst } = require("../utils/dateUtils");
 
 function createPlansRouter() {
   const router = express.Router();
-  router.use(requireAuth, requireStaff);
+  router.use("/api/plans", requireAuth, requireStaff);
 
   router.get("/api/plans", async (req, res) => {
     try {

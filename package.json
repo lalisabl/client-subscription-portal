@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "hash-password": "node scripts/hash-password.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
