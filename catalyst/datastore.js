@@ -3,13 +3,19 @@
 const catalystSDK = require("zcatalyst-sdk-node");
 
 function getCatalyst(req) {
-  if (req && req.headers && req.headers["x-zc-projectid"]) {
-    return catalystSDK.initialize(req);
+  // AppSail injects Catalyst project headers only when run via `catalyst serve` / deployed AppSail.
+  // Plain `node index.js` / nodemon has no context — initialize() fails and the SDK module
+  // itself has no .zcql(), which surfaces as "catalyst.zcql is not a function".
+  if (!req || typeof req !== "object") {
+    throw new Error('Catalyst request context missing. Start the API with: cd backend && catalyst serve');
   }
   try {
-    return catalystSDK.initialize();
-  } catch {
-    return catalystSDK;
+    return catalystSDK.initialize(req);
+  } catch (err) {
+    const msg = String(err?.message || err);
+    throw new Error(
+      `Catalyst SDK init failed: ${msg}. Run AppSail via "catalyst serve" (not "npm run dev" / nodemon).`
+    );
   }
 }
 
