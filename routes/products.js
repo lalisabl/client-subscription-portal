@@ -21,10 +21,11 @@ function createProductsRouter() {
     try {
       const q = safeStr(req.query.q).toLowerCase();
       const active = safeStr(req.query.active);
-      let where = "1=1";
-      if (active === "true") where += " AND active=true";
-      if (active === "false") where += " AND active=false";
-      if (q) where += ` AND (name LIKE '%${escapeZcql(q)}%' OR description LIKE '%${escapeZcql(q)}%')`;
+      const parts = [];
+      if (active === "true") parts.push("active = TRUE");
+      if (active === "false") parts.push("active = FALSE");
+      if (q) parts.push(`(name LIKE '%${escapeZcql(q)}%' OR description LIKE '%${escapeZcql(q)}%')`);
+      const where = parts.join(" AND ");
       const limit = Math.min(Number(req.query.limit) || 100, 200);
       const offset = Math.max(Number(req.query.offset) || 0, 0);
       const [rows, total] = await Promise.all([

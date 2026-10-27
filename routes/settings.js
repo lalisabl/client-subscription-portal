@@ -21,7 +21,7 @@ function createSettingsRouter() {
 
   router.get("/api/settings", requireAuth, requireStaff, async (req, res) => {
     try {
-      const rows = await findMany(req, "settings", "1=1", "key_name ASC", 100, 0);
+      const rows = await findMany(req, "settings", "", "key_name ASC", 100, 0);
       const map = {};
       for (const r of rows) {
         try {

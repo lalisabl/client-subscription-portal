@@ -19,12 +19,13 @@ function createReportsRouter() {
         `status='paid' AND issue_date>='${escapeZcql(start)}' AND issue_date<='${escapeZcql(end)}'`,
         "issue_date ASC"
       );
-      const overdue = await findAll(
-        req,
-        "invoices",
-        `(status='sent' OR status='overdue' OR status='failed') AND due_date>='${escapeZcql(start)}' AND due_date<='${escapeZcql(end)}'`,
-        "due_date ASC"
-      );
+      const overdueWhereBase = `due_date>='${escapeZcql(start)}' AND due_date<='${escapeZcql(end)}'`;
+      const [overdueSent, overdueMarked, overdueFailed] = await Promise.all([
+        findAll(req, "invoices", `status='sent' AND ${overdueWhereBase}`, "due_date ASC"),
+        findAll(req, "invoices", `status='overdue' AND ${overdueWhereBase}`, "due_date ASC"),
+        findAll(req, "invoices", `status='failed' AND ${overdueWhereBase}`, "due_date ASC"),
+      ]);
+      const overdue = [...overdueSent, ...overdueMarked, ...overdueFailed];
       const activeSubs = await findAll(req, "subscriptions", "status='active'", "CREATEDTIME DESC");
 
       let mrrCents = 0;
@@ -42,7 +43,7 @@ function createReportsRouter() {
       const overdueCents = overdue.reduce((s, i) => s + Number(i.total_cents || 0), 0);
 
       const byStatus = {};
-      const allSubs = await findAll(req, "subscriptions", "1=1", "CREATEDTIME DESC");
+      const allSubs = await findAll(req, "subscriptions", "", "CREATEDTIME DESC");
       for (const s of allSubs) {
         const st = s.status || "unknown";
         byStatus[st] = (byStatus[st] || 0) + 1;

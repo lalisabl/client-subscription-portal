@@ -23,6 +23,15 @@ function escapeZcql(value) {
   return String(value == null ? "" : value).replace(/'/g, "''");
 }
 
+/** ZCQL rejects dummy `1=1` predicates — strip them from WHERE clauses. */
+function normalizeWhere(whereClause) {
+  let w = String(whereClause || "").trim();
+  if (!w || w === "1=1") return "";
+  w = w.replace(/^1\s*=\s*1\s+AND\s+/i, "").replace(/\s+AND\s+1\s*=\s*1$/i, "").trim();
+  if (!w || w === "1=1") return "";
+  return w;
+}
+
 function unwrapRow(result, tableName) {
   if (!Array.isArray(result) || result.length === 0) return null;
   const row = result[0];
@@ -37,7 +46,13 @@ function unwrapRows(result, tableName) {
 async function zcqlQuery(req, query) {
   const catalyst = getCatalyst(req);
   const zcql = catalyst.zcql();
-  return zcql.executeZCQLQuery(query);
+  try {
+    return await zcql.executeZCQLQuery(query);
+  } catch (err) {
+    const msg = String(err?.message || err);
+    console.error("zcql_error", msg, "| query:", query);
+    throw new Error(msg);
+  }
 }
 
 async function findByRowId(req, tableName, rowId) {
@@ -52,19 +67,22 @@ async function findOne(req, tableName, whereClause) {
   return unwrapRow(out, tableName);
 }
 
-async function findMany(req, tableName, whereClause = "1=1", orderBy = "CREATEDTIME DESC", limit = 100, offset = 0) {
-  // ZCQL hard-caps LIMIT at 300 rows
+async function findMany(req, tableName, whereClause = "", orderBy = "CREATEDTIME DESC", limit = 100, offset = 0) {
+  // ZCQL: max 300 rows; pagination is `LIMIT offset, value` (not `LIMIT n OFFSET m`)
   const lim = Math.max(1, Math.min(Number(limit) || 100, 300));
   const off = Math.max(0, Number(offset) || 0);
+  const limitClause = off > 0 ? `LIMIT ${off}, ${lim}` : `LIMIT ${lim}`;
+  const clause = normalizeWhere(whereClause);
+  const where = clause ? `WHERE ${clause}` : "";
   const out = await zcqlQuery(
     req,
-    `SELECT * FROM ${tableName} WHERE ${whereClause} ORDER BY ${orderBy} LIMIT ${lim} OFFSET ${off}`
+    `SELECT * FROM ${tableName} ${where} ORDER BY ${orderBy} ${limitClause}`.replace(/\s+/g, " ").trim()
   );
   return unwrapRows(out, tableName);
 }
 
 /** Fetch all matching rows in pages of 300 (ZCQL max LIMIT). */
-async function findAll(req, tableName, whereClause = "1=1", orderBy = "CREATEDTIME DESC", maxRows = 3000) {
+async function findAll(req, tableName, whereClause = "", orderBy = "CREATEDTIME DESC", maxRows = 3000) {
   const pageSize = 300;
   const all = [];
   let offset = 0;
@@ -77,8 +95,13 @@ async function findAll(req, tableName, whereClause = "1=1", orderBy = "CREATEDTI
   return all.slice(0, maxRows);
 }
 
-async function countRows(req, tableName, whereClause = "1=1") {
-  const out = await zcqlQuery(req, `SELECT COUNT(ROWID) FROM ${tableName} WHERE ${whereClause}`);
+async function countRows(req, tableName, whereClause = "") {
+  const clause = normalizeWhere(whereClause);
+  const where = clause ? `WHERE ${clause}` : "";
+  const out = await zcqlQuery(
+    req,
+    `SELECT COUNT(ROWID) FROM ${tableName} ${where}`.replace(/\s+/g, " ").trim()
+  );
   if (!Array.isArray(out) || out.length === 0) return 0;
   const row = out[0];
   const nested = row?.[tableName] || row || {};

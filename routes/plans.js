@@ -21,10 +21,11 @@ function createPlansRouter() {
     try {
       const productId = safeStr(req.query.product_rowid);
       const active = safeStr(req.query.active);
-      let where = "1=1";
-      if (productId) where += ` AND product_rowid='${escapeZcql(productId)}'`;
-      if (active === "true") where += " AND active=true";
-      if (active === "false") where += " AND active=false";
+      const parts = [];
+      if (productId) parts.push(`product_rowid='${escapeZcql(productId)}'`);
+      if (active === "true") parts.push("active = TRUE");
+      if (active === "false") parts.push("active = FALSE");
+      const where = parts.join(" AND ");
       const [rows, total] = await Promise.all([
         findMany(req, "plans", where, "CREATEDTIME DESC", Number(req.query.limit) || 100, Number(req.query.offset) || 0),
         countRows(req, "plans", where),

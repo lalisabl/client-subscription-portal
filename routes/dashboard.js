@@ -31,17 +31,16 @@ function createDashboardRouter() {
         else mrrCents += amount;
       }
 
-      const overdueInvoices = await findMany(
-        req,
-        "invoices",
-        `(status='sent' OR status='overdue' OR status='failed') AND due_date<'${escapeZcql(todayYmdSa())}'`,
-        "due_date ASC",
-        200,
-        0
-      );
+      const dueBefore = escapeZcql(todayYmdSa());
+      const [overdueSent, overdueMarked, overdueFailed] = await Promise.all([
+        findMany(req, "invoices", `status='sent' AND due_date<'${dueBefore}'`, "due_date ASC", 200, 0),
+        findMany(req, "invoices", `status='overdue' AND due_date<'${dueBefore}'`, "due_date ASC", 200, 0),
+        findMany(req, "invoices", `status='failed' AND due_date<'${dueBefore}'`, "due_date ASC", 200, 0),
+      ]);
+      const overdueInvoices = [...overdueSent, ...overdueMarked, ...overdueFailed];
       const overdueCents = overdueInvoices.reduce((sum, i) => sum + Number(i.total_cents || 0), 0);
 
-      const plans = await findMany(req, "plans", "active=true", "CREATEDTIME DESC", 100, 0);
+      const plans = await findMany(req, "plans", "active = TRUE", "CREATEDTIME DESC", 100, 0);
       const planMix = [];
       for (const p of plans) {
         const count = await countRows(req, "subscriptions", `plan_rowid='${escapeZcql(p.ROWID)}' AND status='active'`);
@@ -82,7 +81,7 @@ function createDashboardRouter() {
         0
       );
 
-      const activity = await findMany(req, "activity_log", "1=1", "CREATEDTIME DESC", 10, 0);
+      const activity = await findMany(req, "activity_log", "", "CREATEDTIME DESC", 10, 0);
 
       // simple 12-month revenue trend from paid invoices (best-effort)
       const paid = await findAll(req, "invoices", "status='paid'", "issue_date ASC");
