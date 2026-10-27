@@ -3,8 +3,8 @@
 const express = require("express");
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
-const { findOne, insertRow, updateRow, escapeZcql, logActivity } = require("../catalyst/datastore");
-const { signToken, requireAuth, safeStr } = require("../utils/authUtils");
+const { findOne, insertRow, updateRow, deleteRow, escapeZcql, logActivity } = require("../catalyst/datastore");
+const { signToken, requireAuth, requireInternalSecret, safeStr } = require("../utils/authUtils");
 const { nowUtcForCatalyst } = require("../utils/dateUtils");
 const { sendPasswordResetEmail } = require("../services/email");
 
@@ -172,6 +172,42 @@ function createAuthRouter() {
     }
   });
 
+  /** Local/bootstrap: delete+recreate admin by email (requires x-internal-secret) */
+  router.post("/api/auth/seed-admin", async (req, res) => {
+    try {
+      if (!requireInternalSecret(req, res)) return;
+      const email = safeStr(req.body?.email || "admin@manvic.co.za").toLowerCase();
+      const password = safeStr(req.body?.password || "Admin123!");
+      const name = safeStr(req.body?.name || "Admin");
+      if (!email || !password) {
+        return res.status(400).json({ ok: false, error: "Email and password are required" });
+      }
+
+      const existing = await findOne(req, "users", `email='${escapeZcql(email)}'`);
+      if (existing?.ROWID) {
+        await deleteRow(req, "users", existing.ROWID);
+      }
+
+      const password_hash = await bcrypt.hash(password, 10);
+      const row = await insertRow(req, "users", {
+        email,
+        name,
+        role: "admin",
+        password_hash,
+        status: "active",
+        created_at: nowUtcForCatalyst(),
+      });
+
+      return res.status(201).json({
+        ok: true,
+        deleted: !!existing?.ROWID,
+        user: publicUser({ ...row, email, name, role: "admin", status: "active" }),
+      });
+    } catch (err) {
+      return res.status(500).json({ ok: false, error: String(err?.message || err) });
+    }
+  });
+
   /** Staff: create a user (admin/staff/client) */
   router.post("/api/auth/users", requireAuth, async (req, res) => {
     try {
@@ -201,9 +237,8 @@ function createAuthRouter() {
         name,
         role: userRole,
         password_hash,
-        client_rowid: client_rowid || "",
+        ...(client_rowid ? { client_rowid } : {}),
         status: "active",
-        last_login: "",
         created_at: nowUtcForCatalyst(),
       });
 

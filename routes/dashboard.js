@@ -1,7 +1,7 @@
 "use strict";
 
 const express = require("express");
-const { findMany, countRows, escapeZcql } = require("../catalyst/datastore");
+const { findMany, findAll, countRows, escapeZcql } = require("../catalyst/datastore");
 const { requireAuth, requireStaff } = require("../utils/authUtils");
 const { todayYmdSa, parseYmd } = require("../utils/dateUtils");
 
@@ -18,7 +18,7 @@ function createDashboardRouter() {
       const failedSubs = await countRows(req, "subscriptions", "status='failed'");
       const trialSubs = await countRows(req, "subscriptions", "status='trial'");
 
-      const activeList = await findMany(req, "subscriptions", "status='active'", "CREATEDTIME DESC", 500, 0);
+      const activeList = await findAll(req, "subscriptions", "status='active'", "CREATEDTIME DESC");
       let mrrCents = 0;
       for (const s of activeList) {
         const freq = Number(s.frequency || 3);
@@ -85,7 +85,7 @@ function createDashboardRouter() {
       const activity = await findMany(req, "activity_log", "1=1", "CREATEDTIME DESC", 10, 0);
 
       // simple 12-month revenue trend from paid invoices (best-effort)
-      const paid = await findMany(req, "invoices", "status='paid'", "issue_date ASC", 500, 0);
+      const paid = await findAll(req, "invoices", "status='paid'", "issue_date ASC");
       const byMonth = {};
       for (const inv of paid) {
         const key = String(inv.issue_date || "").slice(0, 7);

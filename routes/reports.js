@@ -1,7 +1,7 @@
 "use strict";
 
 const express = require("express");
-const { findMany, escapeZcql } = require("../catalyst/datastore");
+const { findAll, escapeZcql } = require("../catalyst/datastore");
 const { requireAuth, requireStaff, safeStr } = require("../utils/authUtils");
 const { todayYmdSa } = require("../utils/dateUtils");
 
@@ -13,23 +13,19 @@ function createReportsRouter() {
       const start = safeStr(req.query.start) || `${new Date().getFullYear()}-01-01`;
       const end = safeStr(req.query.end) || todayYmdSa();
 
-      const paid = await findMany(
+      const paid = await findAll(
         req,
         "invoices",
         `status='paid' AND issue_date>='${escapeZcql(start)}' AND issue_date<='${escapeZcql(end)}'`,
-        "issue_date ASC",
-        500,
-        0
+        "issue_date ASC"
       );
-      const overdue = await findMany(
+      const overdue = await findAll(
         req,
         "invoices",
         `(status='sent' OR status='overdue' OR status='failed') AND due_date>='${escapeZcql(start)}' AND due_date<='${escapeZcql(end)}'`,
-        "due_date ASC",
-        500,
-        0
+        "due_date ASC"
       );
-      const activeSubs = await findMany(req, "subscriptions", "status='active'", "CREATEDTIME DESC", 500, 0);
+      const activeSubs = await findAll(req, "subscriptions", "status='active'", "CREATEDTIME DESC");
 
       let mrrCents = 0;
       for (const s of activeSubs) {
@@ -46,7 +42,7 @@ function createReportsRouter() {
       const overdueCents = overdue.reduce((s, i) => s + Number(i.total_cents || 0), 0);
 
       const byStatus = {};
-      const allSubs = await findMany(req, "subscriptions", "1=1", "CREATEDTIME DESC", 500, 0);
+      const allSubs = await findAll(req, "subscriptions", "1=1", "CREATEDTIME DESC");
       for (const s of allSubs) {
         const st = s.status || "unknown";
         byStatus[st] = (byStatus[st] || 0) + 1;

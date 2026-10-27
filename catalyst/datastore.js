@@ -53,13 +53,28 @@ async function findOne(req, tableName, whereClause) {
 }
 
 async function findMany(req, tableName, whereClause = "1=1", orderBy = "CREATEDTIME DESC", limit = 100, offset = 0) {
-  const lim = Math.max(1, Math.min(Number(limit) || 100, 500));
+  // ZCQL hard-caps LIMIT at 300 rows
+  const lim = Math.max(1, Math.min(Number(limit) || 100, 300));
   const off = Math.max(0, Number(offset) || 0);
   const out = await zcqlQuery(
     req,
     `SELECT * FROM ${tableName} WHERE ${whereClause} ORDER BY ${orderBy} LIMIT ${lim} OFFSET ${off}`
   );
   return unwrapRows(out, tableName);
+}
+
+/** Fetch all matching rows in pages of 300 (ZCQL max LIMIT). */
+async function findAll(req, tableName, whereClause = "1=1", orderBy = "CREATEDTIME DESC", maxRows = 3000) {
+  const pageSize = 300;
+  const all = [];
+  let offset = 0;
+  while (all.length < maxRows) {
+    const page = await findMany(req, tableName, whereClause, orderBy, pageSize, offset);
+    all.push(...page);
+    if (page.length < pageSize) break;
+    offset += pageSize;
+  }
+  return all.slice(0, maxRows);
 }
 
 async function countRows(req, tableName, whereClause = "1=1") {
@@ -119,6 +134,7 @@ module.exports = {
   findByRowId,
   findOne,
   findMany,
+  findAll,
   countRows,
   insertRow,
   updateRow,

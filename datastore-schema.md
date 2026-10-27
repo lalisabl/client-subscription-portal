@@ -84,11 +84,16 @@ Column names must match exactly (case-sensitive where Catalyst requires it).
 | last_login | DateTime | — | — | — | |
 | created_at | DateTime | — | — | — | |
 
-**Seed (after create):** insert one admin user. To hash a password locally:
+**Seed (after create):** with `catalyst serve` running:
 
 ```bash
-cd backend && node scripts/hash-password.js 'YourPassword'
+curl -X POST http://localhost:3001/api/auth/seed-admin \
+  -H 'Content-Type: application/json' \
+  -H "x-internal-secret: $INTERNAL_API_SECRET" \
+  -d '{"email":"admin@manvic.co.za","password":"Admin123!","name":"Admin"}'
 ```
+
+Or insert manually: hash with `node scripts/hash-password.js 'YourPassword'`, then put the `$2a$…` value in `password_hash` (login with the plain password).
 
 ---
 

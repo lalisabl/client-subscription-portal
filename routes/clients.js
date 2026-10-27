@@ -95,7 +95,6 @@ function createClientsRouter() {
             password_hash,
             client_rowid: String(row.ROWID),
             status: "active",
-            last_login: "",
             created_at: nowUtcForCatalyst(),
           });
           credentials = { email, password };
