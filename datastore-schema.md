@@ -3,183 +3,197 @@
 Create these tables **manually** in Zoho Catalyst Datastore (Console → Data Store → Tables).  
 Column names must match exactly (case-sensitive where Catalyst requires it).
 
-> Catalyst always adds system columns: `ROWID`, `CREATORID`, `CREATEDTIME`, `MODIFIEDTIME`.  
-> Use **Text** unless noted. Prefer **Encrypt** for `password_hash`.
+> Catalyst always adds system columns: `ROWID`, `CREATORID`, `CREATEDTIME`, `MODIFIEDTIME`.
+
+### Type guide (Catalyst)
+
+| Type | Max | When to use |
+|---|---|---|
+| **Var Char** | 255 (set Max Length) | Short values: names, emails, status, IDs — supports Search Index + Default |
+| **Text** | 10,000 | Long content: descriptions, addresses, JSON payloads — **no** Search Index / Default |
+| **Encrypted text** | 10,000 | Secrets: `password_hash` |
+| **Boolean** | — | flags |
+| **Int** | 10 digits | small integers (frequency, cycles, qty, vat_rate) |
+| **BigInt** | 19 digits | money in cents |
+| **Date** | — | `YYYY-MM-DD` |
+| **DateTime** | — | `YYYY-MM-DD HH:MM:SS` |
+
+**Rule:** Var Char for short fields · Text for long / JSON · Encrypted text for passwords.
 
 ---
 
 ## 1. `users`
 
-| Column | Type | Notes |
-|---|---|---|
-| email | Text (unique) | lowercase login email |
-| password_hash | Encrypt / Text | bcrypt hash |
-| role | Text | `admin` \| `staff` \| `client` |
-| name | Text | display name |
-| client_rowid | Text | links client users to `clients.ROWID` |
-| status | Text | `active` \| `disabled` |
-| last_login | Text / DateTime | UTC `YYYY-MM-DD HH:mm:ss` |
-| created_at | Text / DateTime | |
+| Column | Type | Max / options | Notes |
+|---|---|---|---|
+| email | Var Char | 120 · **IsUnique** · Search Index | lowercase login email |
+| password_hash | Encrypted text | — | bcrypt hash |
+| role | Var Char | 20 | `admin` \| `staff` \| `client` |
+| name | Var Char | 120 | display name |
+| client_rowid | Var Char | 50 | links client users to `clients.ROWID` |
+| status | Var Char | 20 · Default `active` | `active` \| `disabled` |
+| last_login | DateTime | — | |
+| created_at | DateTime | — | |
 
 **Seed (after create):** insert one admin user via API or console. To hash a password locally:
 
 ```bash
-node -e "console.log(require('bcryptjs').hashSync('YourPassword', 10))"
+cd backend && node scripts/hash-password.js 'YourPassword'
 ```
 
 ---
 
 ## 2. `clients`
 
-| Column | Type | Notes |
-|---|---|---|
-| name | Text | company / client name |
-| contact_person | Text | |
-| email | Text | |
-| phone | Text | |
-| vat_number | Text | |
-| billing_address | Text | |
-| status | Text | `active` \| `paused` \| `cancelled` |
-| created_at | Text / DateTime | |
+| Column | Type | Max / options | Notes |
+|---|---|---|---|
+| name | Var Char | 150 · Search Index | company / client name |
+| contact_person | Var Char | 120 | |
+| email | Var Char | 120 · Search Index | |
+| phone | Var Char | 40 | |
+| vat_number | Var Char | 40 | |
+| billing_address | Text | — | long address |
+| status | Var Char | 20 · Default `active` | `active` \| `paused` \| `cancelled` |
+| created_at | DateTime | — | |
 
 ---
 
 ## 3. `products`
 
-| Column | Type | Notes |
-|---|---|---|
-| name | Text | |
-| description | Text | |
-| active | Boolean | default true |
-| created_at | Text / DateTime | |
+| Column | Type | Max / options | Notes |
+|---|---|---|---|
+| name | Var Char | 150 · Search Index | |
+| description | Text | — | long description |
+| active | Boolean | Default `true` | |
+| created_at | DateTime | — | |
 
 ---
 
 ## 4. `plans`
 
-| Column | Type | Notes |
-|---|---|---|
-| product_rowid | Text | FK → `products.ROWID` |
-| name | Text | |
-| amount_cents | BigInt / Int | price in cents (ZAR) |
-| currency | Text | default `ZAR` |
-| frequency | Int | PayFast: `3` monthly, `4` quarterly, `5` biannual, `6` annual |
-| cycles | Int | `0` = indefinite |
-| vat_inclusive | Boolean | if true, amount includes VAT |
-| features_json | Text | JSON array/string |
-| active | Boolean | |
-| created_at | Text / DateTime | |
+| Column | Type | Max / options | Notes |
+|---|---|---|---|
+| product_rowid | Var Char | 50 | FK → `products.ROWID` |
+| name | Var Char | 150 · Search Index | |
+| amount_cents | BigInt | — | price in cents (ZAR) |
+| currency | Var Char | 10 · Default `ZAR` | |
+| frequency | Int | — | PayFast: `3` monthly, `4` quarterly, `5` biannual, `6` annual |
+| cycles | Int | Default `0` | `0` = indefinite |
+| vat_inclusive | Boolean | Default `true` | if true, amount includes VAT |
+| features_json | Text | — | JSON array/string |
+| active | Boolean | Default `true` | |
+| created_at | DateTime | — | |
 
 ---
 
 ## 5. `subscriptions`
 
-| Column | Type | Notes |
-|---|---|---|
-| client_rowid | Text | FK → clients |
-| plan_rowid | Text | FK → plans |
-| status | Text | `pending` \| `active` \| `paused` \| `cancelled` \| `failed` \| `trial` |
-| payfast_token | Text | from ITN after first payment |
-| amount_cents | BigInt / Int | |
-| frequency | Int | same as plans |
-| cycles | Int | |
-| start_date | Text / Date | `YYYY-MM-DD` |
-| next_run_date | Text / Date | |
-| created_by | Text | staff email |
-| created_at | Text / DateTime | |
-| updated_at | Text / DateTime | |
+| Column | Type | Max / options | Notes |
+|---|---|---|---|
+| client_rowid | Var Char | 50 · Search Index | FK → clients |
+| plan_rowid | Var Char | 50 | FK → plans |
+| status | Var Char | 20 · Search Index | `pending` \| `active` \| `paused` \| `cancelled` \| `failed` \| `trial` |
+| payfast_token | Var Char | 80 | from ITN after first payment |
+| amount_cents | BigInt | — | |
+| frequency | Int | — | same as plans |
+| cycles | Int | Default `0` | |
+| start_date | Date | — | `YYYY-MM-DD` |
+| next_run_date | Date | — | |
+| created_by | Var Char | 120 | staff email |
+| created_at | DateTime | — | |
+| updated_at | DateTime | — | |
 
 ---
 
 ## 6. `invoices`
 
-| Column | Type | Notes |
-|---|---|---|
-| invoice_number | Text | e.g. `INV-2026-00001` |
-| client_rowid | Text | |
-| subscription_rowid | Text | |
-| issue_date | Text / Date | |
-| due_date | Text / Date | |
-| status | Text | `draft` \| `sent` \| `paid` \| `overdue` \| `failed` |
-| subtotal_cents | BigInt / Int | |
-| vat_cents | BigInt / Int | |
-| total_cents | BigInt / Int | |
-| currency | Text | `ZAR` |
-| pdf_file_id | Text | optional Catalyst File Store id |
-| payfast_payment_id | Text | `pf_payment_id` |
-| m_payment_id | Text | merchant reference sent to PayFast |
-| paid_at | Text / DateTime | |
-| created_at | Text / DateTime | |
+| Column | Type | Max / options | Notes |
+|---|---|---|---|
+| invoice_number | Var Char | 40 · **IsUnique** · Search Index | e.g. `INV-2026-00001` |
+| client_rowid | Var Char | 50 · Search Index | |
+| subscription_rowid | Var Char | 50 | |
+| issue_date | Date | — | |
+| due_date | Date | — | |
+| status | Var Char | 20 · Search Index | `draft` \| `sent` \| `paid` \| `overdue` \| `failed` |
+| subtotal_cents | BigInt | — | |
+| vat_cents | BigInt | — | |
+| total_cents | BigInt | — | |
+| currency | Var Char | 10 · Default `ZAR` | |
+| pdf_file_id | Var Char | 80 | optional Catalyst File Store id |
+| payfast_payment_id | Var Char | 80 | `pf_payment_id` |
+| m_payment_id | Var Char | 80 · Search Index | merchant reference sent to PayFast |
+| paid_at | DateTime | — | |
+| created_at | DateTime | — | |
 
 ---
 
 ## 7. `invoice_line_items`
 
-| Column | Type | Notes |
-|---|---|---|
-| invoice_rowid | Text | FK → invoices |
-| description | Text | |
-| qty | Int | |
-| unit_amount_cents | BigInt / Int | ex-VAT unit |
-| vat_rate | Decimal / Int | e.g. 15 |
-| line_total_cents | BigInt / Int | ex-VAT line total |
+| Column | Type | Max / options | Notes |
+|---|---|---|---|
+| invoice_rowid | Var Char | 50 · Search Index | FK → invoices |
+| description | Text | — | line description can be long |
+| qty | Int | Default `1` | |
+| unit_amount_cents | BigInt | — | ex-VAT unit |
+| vat_rate | Int | Default `15` | e.g. 15 (Catalyst has no Decimal) |
+| line_total_cents | BigInt | — | ex-VAT line total |
 
 ---
 
 ## 8. `payments`
 
-| Column | Type | Notes |
-|---|---|---|
-| invoice_rowid | Text | |
-| subscription_rowid | Text | |
-| client_rowid | Text | |
-| payfast_payment_id | Text | |
-| m_payment_id | Text | |
-| amount_cents | BigInt / Int | |
-| status | Text | `complete` \| `failed` |
-| method | Text | e.g. `cc` |
-| raw_json | Text | ITN payload |
-| created_at | Text / DateTime | |
+| Column | Type | Max / options | Notes |
+|---|---|---|---|
+| invoice_rowid | Var Char | 50 · Search Index | |
+| subscription_rowid | Var Char | 50 | |
+| client_rowid | Var Char | 50 · Search Index | |
+| payfast_payment_id | Var Char | 80 | |
+| m_payment_id | Var Char | 80 · Search Index | |
+| amount_cents | BigInt | — | |
+| status | Var Char | 20 | `complete` \| `failed` |
+| method | Var Char | 20 | e.g. `cc` |
+| raw_json | Text | — | full ITN payload |
+| created_at | DateTime | — | |
 
 ---
 
 ## 9. `payfast_webhook_events`
 
-| Column | Type | Notes |
-|---|---|---|
-| m_payment_id | Text | |
-| pf_payment_id | Text | unique-ish for idempotency |
-| payment_status | Text | COMPLETE / FAILED / CANCELLED |
-| token | Text | subscription token |
-| signature_valid | Boolean | |
-| payload_json | Text | |
-| received_at | Text / DateTime | |
-| processed | Boolean | |
-| process_error | Text | |
+| Column | Type | Max / options | Notes |
+|---|---|---|---|
+| m_payment_id | Var Char | 80 · Search Index | |
+| pf_payment_id | Var Char | 80 · Search Index | for idempotency |
+| payment_status | Var Char | 20 | COMPLETE / FAILED / CANCELLED |
+| token | Var Char | 80 | subscription token |
+| signature_valid | Boolean | — | |
+| payload_json | Text | — | full webhook body |
+| received_at | DateTime | — | |
+| processed | Boolean | Default `false` | |
+| process_error | Text | — | error details if any |
 
 ---
 
 ## 10. `activity_log`
 
-| Column | Type | Notes |
-|---|---|---|
-| actor_type | Text | admin/staff/client/payfast/system |
-| actor_email | Text | |
-| action | Text | e.g. `client.create` |
-| entity_type | Text | |
-| entity_rowid | Text | |
-| summary | Text | human readable |
-| meta_json | Text | |
-| created_at | Text / DateTime | |
+| Column | Type | Max / options | Notes |
+|---|---|---|---|
+| actor_type | Var Char | 20 | admin/staff/client/payfast/system |
+| actor_email | Var Char | 120 · Search Index | |
+| action | Var Char | 60 · Search Index | e.g. `client.create` |
+| entity_type | Var Char | 40 | |
+| entity_rowid | Var Char | 50 | |
+| summary | Var Char | 255 | human readable (keep ≤255) |
+| meta_json | Text | — | optional JSON |
+| created_at | DateTime | — | |
 
 ---
 
 ## 11. `settings`
 
-| Column | Type | Notes |
-|---|---|---|
-| key_name | Text | unique key: `company`, `vat_rate`, `invoice_prefix` |
-| value_json | Text | JSON string or plain value |
+| Column | Type | Max / options | Notes |
+|---|---|---|---|
+| key_name | Var Char | 60 · **IsUnique** | `company`, `vat_rate`, `invoice_prefix` |
+| value_json | Text | — | JSON string or plain value |
 
 **Suggested seed rows:**
 
@@ -193,17 +207,17 @@ node -e "console.log(require('bcryptjs').hashSync('YourPassword', 10))"
 
 ## 12. `notification_logs`
 
-| Column | Type | Notes |
-|---|---|---|
-| template | Text | |
-| recipient_email | Text | |
-| subject | Text | |
-| status | Text | SENT / FAILED / SKIPPED |
-| provider_message_id | Text | |
-| error_message | Text | |
-| related_type | Text | |
-| related_id | Text | |
-| sent_at | Text / DateTime | |
+| Column | Type | Max / options | Notes |
+|---|---|---|---|
+| template | Var Char | 80 | |
+| recipient_email | Var Char | 120 · Search Index | |
+| subject | Var Char | 200 | |
+| status | Var Char | 20 | SENT / FAILED / SKIPPED |
+| provider_message_id | Var Char | 120 | |
+| error_message | Text | — | can be long |
+| related_type | Var Char | 40 | |
+| related_id | Var Char | 50 | |
+| sent_at | DateTime | — | |
 
 ---
 
