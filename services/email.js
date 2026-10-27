@@ -37,7 +37,7 @@ async function sendEmail({ to, subject, html, text, attachments, template = "gen
     try {
       const { insertRow } = require("../catalyst/datastore");
       const { nowUtcForCatalyst } = require("../utils/dateUtils");
-      await insertRow(req, "notification_logs", {
+      const logRow = {
         template,
         recipient_email: safeStr(to),
         subject: safeStr(subject),
@@ -46,8 +46,10 @@ async function sendEmail({ to, subject, html, text, attachments, template = "gen
         error_message,
         related_type,
         related_id,
-        sent_at: status === "SENT" ? nowUtcForCatalyst() : "",
-      });
+      };
+      // Omit DateTime when unset — Catalyst rejects empty strings for datetime columns.
+      if (status === "SENT") logRow.sent_at = nowUtcForCatalyst();
+      await insertRow(req, "notification_logs", logRow);
     } catch (e) {
       console.error("notification_log_failed", String(e?.message || e));
     }

@@ -109,6 +109,7 @@ async function createInvoiceForSubscription(req, { subscription, client, plan, s
   const issueDate = todayYmdSa();
   const dueDate = issueDate;
 
+  // Omit DateTime fields when unset — Catalyst rejects empty strings for datetime columns.
   const invoice = await insertRow(req, "invoices", {
     invoice_number: invoiceNumber,
     client_rowid: String(client.ROWID || subscription.client_rowid),
@@ -123,7 +124,6 @@ async function createInvoiceForSubscription(req, { subscription, client, plan, s
     pdf_file_id: "",
     payfast_payment_id: "",
     m_payment_id: `sub-${subscription.ROWID}-${Date.now()}`,
-    paid_at: "",
     created_at: nowUtcForCatalyst(),
   });
 
