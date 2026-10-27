@@ -30,21 +30,49 @@ function fromAddress() {
   return `"${name}" <${email}>`;
 }
 
-async function sendEmail({ to, subject, html, text, attachments }) {
+async function sendEmail({ to, subject, html, text, attachments, template = "generic", related_type = "", related_id = "", req = null }) {
   const transporter = getTransporter();
+  const log = async (status, messageId = "", error_message = "") => {
+    if (!req) return;
+    try {
+      const { insertRow } = require("../catalyst/datastore");
+      const { nowUtcForCatalyst } = require("../utils/dateUtils");
+      await insertRow(req, "notification_logs", {
+        template,
+        recipient_email: safeStr(to),
+        subject: safeStr(subject),
+        status,
+        provider_message_id: messageId,
+        error_message,
+        related_type,
+        related_id,
+        sent_at: status === "SENT" ? nowUtcForCatalyst() : "",
+      });
+    } catch (e) {
+      console.error("notification_log_failed", String(e?.message || e));
+    }
+  };
+
   if (!transporter) {
     console.warn("SMTP not configured — email skipped:", subject, "→", to);
+    await log("SKIPPED");
     return { ok: false, skipped: true, messageId: "" };
   }
-  const info = await transporter.sendMail({
-    from: fromAddress(),
-    to,
-    subject,
-    html,
-    text: text || undefined,
-    attachments: attachments || undefined,
-  });
-  return { ok: true, skipped: false, messageId: info.messageId || "" };
+  try {
+    const info = await transporter.sendMail({
+      from: fromAddress(),
+      to,
+      subject,
+      html,
+      text: text || undefined,
+      attachments: attachments || undefined,
+    });
+    await log("SENT", info.messageId || "");
+    return { ok: true, skipped: false, messageId: info.messageId || "" };
+  } catch (err) {
+    await log("FAILED", "", String(err?.message || err));
+    throw err;
+  }
 }
 
 async function sendClientCredentialsEmail({ to, name, email, password, loginUrl }) {
