@@ -21,7 +21,10 @@ const { createPortalRouter } = require("./routes/portal");
 const app = express();
 
 /* ---------------------------
-   CORS (local + configured origins)
+   CORS
+   - localhost always allowed (local .env / catalyst serve)
+   - other origins only when ENABLE_APP_CORS=true
+   - live Slate uses Catalyst Domain CORS, so keep ENABLE_APP_CORS=false there
 ---------------------------- */
 const ENABLE_APP_CORS = String(process.env.ENABLE_APP_CORS || "").toLowerCase() === "true";
 const ALLOWED_ORIGINS = String(process.env.CORS_ORIGINS || "http://localhost:5173")
@@ -29,24 +32,30 @@ const ALLOWED_ORIGINS = String(process.env.CORS_ORIGINS || "http://localhost:517
   .map((s) => s.trim())
   .filter(Boolean);
 
-if (ENABLE_APP_CORS) {
-  app.use((req, res, next) => {
-    const origin = req.headers.origin;
-    if (origin && ALLOWED_ORIGINS.includes(origin)) {
-      res.setHeader("Access-Control-Allow-Origin", origin);
-      res.setHeader("Vary", "Origin");
-      res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
-      res.setHeader(
-        "Access-Control-Allow-Headers",
-        "Content-Type, Authorization, X-Requested-With, x-internal-secret"
-      );
-      res.setHeader("Access-Control-Max-Age", "86400");
-      res.setHeader("Access-Control-Allow-Credentials", "true");
-    }
-    if (req.method === "OPTIONS") return res.status(204).end();
-    return next();
-  });
+function isLocalOrigin(origin) {
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin || "");
 }
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  const allow =
+    origin &&
+    (isLocalOrigin(origin) || (ENABLE_APP_CORS && ALLOWED_ORIGINS.includes(origin)));
+
+  if (allow) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization, X-Requested-With, x-internal-secret"
+    );
+    res.setHeader("Access-Control-Max-Age", "86400");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+  }
+  if (req.method === "OPTIONS") return res.status(204).end();
+  return next();
+});
 
 app.use((req, res, next) => {
   console.log(`[manvic-api] ${req.method} ${req.url}`);
