@@ -58,7 +58,21 @@ function createClientsRouter() {
         100,
         0
       );
-      return res.json({ ok: true, client: row, subscriptions });
+      let portalUser = null;
+      const email = safeStr(row.email).toLowerCase();
+      if (email) {
+        portalUser = await findOne(req, "users", `email='${escapeZcql(email)}' AND role='client'`);
+      }
+      if (!portalUser) {
+        portalUser = await findOne(req, "users", `client_rowid='${escapeZcql(req.params.id)}'`);
+      }
+      return res.json({
+        ok: true,
+        client: row,
+        subscriptions,
+        hasPortalLogin: !!portalUser,
+        portalEmail: portalUser?.email || null,
+      });
     } catch (err) {
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
     }
@@ -69,7 +83,11 @@ function createClientsRouter() {
       const body = req.body || {};
       const name = safeStr(body.name);
       const email = safeStr(body.email).toLowerCase();
+      const wantLogin = body.create_login === true || body.create_login === "true" || body.create_login === 1;
       if (!name) return res.status(400).json({ ok: false, error: "Name is required" });
+      if (wantLogin && !email) {
+        return res.status(400).json({ ok: false, error: "Email is required to create a portal login" });
+      }
 
       const row = await insertRow(req, "clients", {
         name,
@@ -83,9 +101,13 @@ function createClientsRouter() {
       });
 
       let credentials = null;
-      if (body.create_login && email) {
+      let loginStatus = "skipped";
+
+      if (wantLogin) {
         const existing = await findOne(req, "users", `email='${escapeZcql(email)}'`);
-        if (!existing) {
+        if (existing) {
+          loginStatus = "exists";
+        } else {
           const password = safeStr(body.password) || crypto.randomBytes(6).toString("base64url");
           const password_hash = await bcrypt.hash(password, 10);
           await insertRow(req, "users", {
@@ -99,13 +121,15 @@ function createClientsRouter() {
           });
           credentials = { email, password };
           const loginUrl = `${safeStr(process.env.PORTAL_BASE_URL || "http://localhost:5173").replace(/\/+$/, "")}/login`;
-          await sendClientCredentialsEmail({
+          const mail = await sendClientCredentialsEmail({
             to: email,
             name: safeStr(body.contact_person) || name,
             email,
             password,
             loginUrl,
           });
+          loginStatus = mail?.skipped ? "created_email_skipped" : "created_emailed";
+          if (credentials) credentials.emailSkipped = !!mail?.skipped;
         }
       }
 
@@ -118,7 +142,64 @@ function createClientsRouter() {
         summary: `Created client ${name}`,
       });
 
-      return res.status(201).json({ ok: true, client: row, credentials });
+      return res.status(201).json({ ok: true, client: row, credentials, loginStatus });
+    } catch (err) {
+      return res.status(500).json({ ok: false, error: String(err?.message || err) });
+    }
+  });
+
+  /** Create portal login for an existing client (if missing). */
+  router.post("/api/clients/:id/portal-login", async (req, res) => {
+    try {
+      const client = await findByRowId(req, "clients", req.params.id);
+      if (!client) return res.status(404).json({ ok: false, error: "Client not found" });
+      const email = safeStr(req.body?.email || client.email).toLowerCase();
+      if (!email) return res.status(400).json({ ok: false, error: "Client has no email" });
+
+      const existing = await findOne(req, "users", `email='${escapeZcql(email)}'`);
+      if (existing) {
+        return res.status(409).json({ ok: false, error: "A portal user already exists for this email" });
+      }
+
+      const password = safeStr(req.body?.password) || crypto.randomBytes(6).toString("base64url");
+      const password_hash = await bcrypt.hash(password, 10);
+      await insertRow(req, "users", {
+        email,
+        name: safeStr(client.contact_person) || safeStr(client.name),
+        role: "client",
+        password_hash,
+        client_rowid: String(client.ROWID),
+        status: "active",
+        created_at: nowUtcForCatalyst(),
+      });
+
+      if (!client.email) {
+        await updateRow(req, "clients", client.ROWID, { email });
+      }
+
+      const loginUrl = `${safeStr(process.env.PORTAL_BASE_URL || "http://localhost:5173").replace(/\/+$/, "")}/login`;
+      const mail = await sendClientCredentialsEmail({
+        to: email,
+        name: safeStr(client.contact_person) || safeStr(client.name),
+        email,
+        password,
+        loginUrl,
+      });
+
+      await logActivity(req, {
+        actor_type: req.user.role,
+        actor_email: req.user.email,
+        action: "client.portal_login",
+        entity_type: "client",
+        entity_rowid: String(client.ROWID),
+        summary: `Created portal login for ${email}`,
+      });
+
+      return res.status(201).json({
+        ok: true,
+        credentials: { email, password, emailSkipped: !!mail?.skipped },
+        loginStatus: mail?.skipped ? "created_email_skipped" : "created_emailed",
+      });
     } catch (err) {
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
     }
