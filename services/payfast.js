@@ -43,15 +43,23 @@ function apiBase() {
   return `${base}/subscriptions`;
 }
 
-/** MD5 signature for PayFast form / onsite / ITN payloads */
+/** PHP-style urlencode: uppercase hex escapes, spaces as + */
+function pfEncode(value) {
+  return encodeURIComponent(String(value).trim())
+    .replace(/%[0-9a-f]{2}/gi, (hex) => hex.toUpperCase())
+    .replace(/%20/g, "+");
+}
+
+/**
+ * MD5 signature for PayFast checkout / onsite / ITN payloads.
+ * Important: keep attribute order (do NOT sort alphabetically — that is API-only).
+ */
 function generateSignature(data, passphrase) {
-  const keys = Object.keys(data)
-    .filter((k) => k !== "signature" && data[k] !== undefined && data[k] !== null && String(data[k]) !== "")
-    .sort();
-  const paramString = keys
-    .map((k) => `${k}=${encodeURIComponent(String(data[k]).trim()).replace(/%20/g, "+")}`)
-    .join("&");
-  const withPass = passphrase ? `${paramString}&passphrase=${encodeURIComponent(passphrase.trim()).replace(/%20/g, "+")}` : paramString;
+  const keys = Object.keys(data).filter(
+    (k) => k !== "signature" && data[k] !== undefined && data[k] !== null && String(data[k]) !== ""
+  );
+  const paramString = keys.map((k) => `${k}=${pfEncode(data[k])}`).join("&");
+  const withPass = passphrase ? `${paramString}&passphrase=${pfEncode(passphrase)}` : paramString;
   return crypto.createHash("md5").update(withPass).digest("hex");
 }
 

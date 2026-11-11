@@ -7,7 +7,9 @@
     "start": "node index.js",
     "dev": "catalyst serve",
     "dev:node": "nodemon index.js",
-    "hash-password": "node scripts/hash-password.js"
+    "hash-password": "node scripts/hash-password.js",
+    "test:payfast": "node scripts/test-payfast.js",
+    "test:payfast": "node scripts/test-payfast.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
