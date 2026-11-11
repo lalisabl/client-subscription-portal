@@ -3,8 +3,8 @@
   "build_path": ".",
   "stack": "node20",
   "env_variables": {
-    "ENABLE_APP_CORS": "true",
-    "CORS_ORIGINS": "https://client-subscription--chplpfzo.onslate.com,http://localhost:5173",
+    "ENABLE_APP_CORS": "false",
+    "CORS_ORIGINS": "http://localhost:5173",
     "PORTAL_BASE_URL": "https://client-subscription--chplpfzo.onslate.com",
     "API_PUBLIC_URL": "https://manvic-api-10137288052.development.catalystappsail.com",
     "JWT_SECRET": "dev-manvic-jwt-secret-change-me-32chars",
