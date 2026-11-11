@@ -13,6 +13,9 @@ function isSmtpConfigured() {
 
 function getTransporter() {
   if (!isSmtpConfigured()) return null;
+  // Short timeouts so AppSail (~30s request limit) fails with a clear SMTP
+  // error instead of hanging until EXECUTION_TIME_EXCEEDED.
+  const timeoutMs = Number(process.env.SMTP_TIMEOUT_MS || 10000);
   return nodemailer.createTransport({
     host: safeStr(process.env.SMTP_HOST),
     port: Number(process.env.SMTP_PORT || 587),
@@ -21,6 +24,9 @@ function getTransporter() {
       user: safeStr(process.env.SMTP_USER),
       pass: safeStr(process.env.SMTP_PASS),
     },
+    connectionTimeout: timeoutMs,
+    greetingTimeout: timeoutMs,
+    socketTimeout: timeoutMs,
   });
 }
 

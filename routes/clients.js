@@ -121,15 +121,29 @@ function createClientsRouter() {
           });
           credentials = { email, password };
           const loginUrl = `${safeStr(process.env.PORTAL_BASE_URL || "http://localhost:5173").replace(/\/+$/, "")}/login`;
-          const mail = await sendClientCredentialsEmail({
-            to: email,
-            name: safeStr(body.contact_person) || name,
-            email,
-            password,
-            loginUrl,
-          });
-          loginStatus = mail?.skipped ? "created_email_skipped" : "created_emailed";
-          if (credentials) credentials.emailSkipped = !!mail?.skipped;
+          let mail = null;
+          try {
+            mail = await sendClientCredentialsEmail({
+              to: email,
+              name: safeStr(body.contact_person) || name,
+              email,
+              password,
+              loginUrl,
+            });
+          } catch (mailErr) {
+            console.error("client_credentials_email_failed", String(mailErr?.message || mailErr));
+            mail = { ok: false, skipped: false, failed: true, error: String(mailErr?.message || mailErr) };
+          }
+          loginStatus = mail?.skipped
+            ? "created_email_skipped"
+            : mail?.failed
+              ? "created_email_failed"
+              : "created_emailed";
+          if (credentials) {
+            credentials.emailSkipped = !!mail?.skipped;
+            credentials.emailFailed = !!mail?.failed;
+            if (mail?.error) credentials.emailError = mail.error;
+          }
         }
       }
 
@@ -178,13 +192,19 @@ function createClientsRouter() {
       }
 
       const loginUrl = `${safeStr(process.env.PORTAL_BASE_URL || "http://localhost:5173").replace(/\/+$/, "")}/login`;
-      const mail = await sendClientCredentialsEmail({
-        to: email,
-        name: safeStr(client.contact_person) || safeStr(client.name),
-        email,
-        password,
-        loginUrl,
-      });
+      let mail = null;
+      try {
+        mail = await sendClientCredentialsEmail({
+          to: email,
+          name: safeStr(client.contact_person) || safeStr(client.name),
+          email,
+          password,
+          loginUrl,
+        });
+      } catch (mailErr) {
+        console.error("portal_login_email_failed", String(mailErr?.message || mailErr));
+        mail = { ok: false, skipped: false, failed: true, error: String(mailErr?.message || mailErr) };
+      }
 
       await logActivity(req, {
         actor_type: req.user.role,
@@ -197,8 +217,18 @@ function createClientsRouter() {
 
       return res.status(201).json({
         ok: true,
-        credentials: { email, password, emailSkipped: !!mail?.skipped },
-        loginStatus: mail?.skipped ? "created_email_skipped" : "created_emailed",
+        credentials: {
+          email,
+          password,
+          emailSkipped: !!mail?.skipped,
+          emailFailed: !!mail?.failed,
+          emailError: mail?.error || undefined,
+        },
+        loginStatus: mail?.skipped
+          ? "created_email_skipped"
+          : mail?.failed
+            ? "created_email_failed"
+            : "created_emailed",
       });
     } catch (err) {
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
