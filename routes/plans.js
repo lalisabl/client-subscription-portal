@@ -12,6 +12,7 @@ const {
 } = require("../catalyst/datastore");
 const { requireAuth, requireStaff, safeStr } = require("../utils/authUtils");
 const { nowUtcForCatalyst } = require("../utils/dateUtils");
+const { parseListPagination, listMeta } = require("../utils/pagination");
 
 function createPlansRouter() {
   const router = express.Router();
@@ -26,11 +27,12 @@ function createPlansRouter() {
       if (active === "true") parts.push("active = TRUE");
       if (active === "false") parts.push("active = FALSE");
       const where = parts.join(" AND ");
+      const { limit, offset } = parseListPagination(req);
       const [rows, total] = await Promise.all([
-        findMany(req, "plans", where, "CREATEDTIME DESC", Number(req.query.limit) || 100, Number(req.query.offset) || 0),
+        findMany(req, "plans", where, "CREATEDTIME DESC", limit, offset),
         countRows(req, "plans", where),
       ]);
-      return res.json({ ok: true, rows, total });
+      return res.json({ ok: true, rows, ...listMeta(limit, offset, total) });
     } catch (err) {
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
     }

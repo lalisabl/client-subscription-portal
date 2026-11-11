@@ -3,6 +3,7 @@
 const express = require("express");
 const { findMany, countRows, escapeZcql } = require("../catalyst/datastore");
 const { requireAuth, requireStaff, safeStr } = require("../utils/authUtils");
+const { parseListPagination, listMeta } = require("../utils/pagination");
 
 function createActivityRouter() {
   const router = express.Router();
@@ -14,13 +15,12 @@ function createActivityRouter() {
       let where = "1=1";
       if (entity) where += ` AND entity_type='${escapeZcql(entity)}'`;
       if (q) where += ` AND (summary LIKE '%${escapeZcql(q)}%' OR actor_email LIKE '%${escapeZcql(q)}%' OR action LIKE '%${escapeZcql(q)}%')`;
-      const limit = Math.min(Number(req.query.limit) || 50, 200);
-      const offset = Math.max(Number(req.query.offset) || 0, 0);
+      const { limit, offset } = parseListPagination(req);
       const [rows, total] = await Promise.all([
         findMany(req, "activity_log", where, "CREATEDTIME DESC", limit, offset),
         countRows(req, "activity_log", where),
       ]);
-      return res.json({ ok: true, rows, total });
+      return res.json({ ok: true, rows, ...listMeta(limit, offset, total) });
     } catch (err) {
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
     }

@@ -16,6 +16,7 @@ const {
 const { requireAuth, requireStaff, safeStr } = require("../utils/authUtils");
 const { nowUtcForCatalyst } = require("../utils/dateUtils");
 const { sendClientCredentialsEmail } = require("../services/email");
+const { parseListPagination, listMeta } = require("../utils/pagination");
 
 function createClientsRouter() {
   const router = express.Router();
@@ -26,8 +27,7 @@ function createClientsRouter() {
     try {
       const q = safeStr(req.query.q).toLowerCase();
       const status = safeStr(req.query.status);
-      const limit = Math.min(Number(req.query.limit) || 50, 200);
-      const offset = Math.max(Number(req.query.offset) || 0, 0);
+      const { limit, offset } = parseListPagination(req);
 
       let where = "1=1";
       if (status && status !== "all") where += ` AND status='${escapeZcql(status)}'`;
@@ -40,7 +40,7 @@ function createClientsRouter() {
         findMany(req, "clients", where, "CREATEDTIME DESC", limit, offset),
         countRows(req, "clients", where),
       ]);
-      return res.json({ ok: true, rows, total, limit, offset });
+      return res.json({ ok: true, rows, ...listMeta(limit, offset, total) });
     } catch (err) {
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
     }

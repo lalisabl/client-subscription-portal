@@ -24,6 +24,7 @@ const {
   cardUpdateUrl,
 } = require("../services/payfast");
 const { createInvoiceForSubscription } = require("../services/invoices");
+const { parseListPagination, listMeta } = require("../utils/pagination");
 
 function createSubscriptionsRouter() {
   const router = express.Router();
@@ -33,26 +34,37 @@ function createSubscriptionsRouter() {
       const status = safeStr(req.query.status);
       const clientId = safeStr(req.query.client_rowid);
       const q = safeStr(req.query.q);
+      const { limit, offset } = parseListPagination(req);
       let where = "1=1";
       if (status && status !== "all") where += ` AND status='${escapeZcql(status)}'`;
       if (clientId) where += ` AND client_rowid='${escapeZcql(clientId)}'`;
+      if (q) {
+        const like = escapeZcql(q);
+        const [clientHits, planHits] = await Promise.all([
+          findMany(req, "clients", `name LIKE '%${like}%'`, "CREATEDTIME DESC", 300, 0),
+          findMany(req, "plans", `name LIKE '%${like}%'`, "CREATEDTIME DESC", 300, 0),
+        ]);
+        const orParts = [
+          ...clientHits.map((c) => `client_rowid='${escapeZcql(c.ROWID)}'`),
+          ...planHits.map((p) => `plan_rowid='${escapeZcql(p.ROWID)}'`),
+        ];
+        if (orParts.length === 0) {
+          return res.json({ ok: true, rows: [], ...listMeta(limit, offset, 0) });
+        }
+        where += ` AND (${orParts.join(" OR ")})`;
+      }
       const [rows, total] = await Promise.all([
-        findMany(req, "subscriptions", where, "CREATEDTIME DESC", Number(req.query.limit) || 50, Number(req.query.offset) || 0),
+        findMany(req, "subscriptions", where, "CREATEDTIME DESC", limit, offset),
         countRows(req, "subscriptions", where),
       ]);
 
-      // enrich lightly
       const enriched = [];
       for (const sub of rows) {
         const client = await findByRowId(req, "clients", sub.client_rowid);
         const plan = await findByRowId(req, "plans", sub.plan_rowid);
-        if (q) {
-          const hay = `${client?.name || ""} ${plan?.name || ""}`.toLowerCase();
-          if (!hay.includes(q.toLowerCase())) continue;
-        }
         enriched.push({ ...sub, client, plan });
       }
-      return res.json({ ok: true, rows: enriched, total });
+      return res.json({ ok: true, rows: enriched, ...listMeta(limit, offset, total) });
     } catch (err) {
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
     }

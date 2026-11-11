@@ -11,6 +11,7 @@ const {
 const { requireAuth, requireStaff, isStaff, safeStr } = require("../utils/authUtils");
 const { buildInvoicePdfBuffer, formatZAR } = require("../services/invoices");
 const { sendInvoiceEmail } = require("../services/email");
+const { parseListPagination, listMeta } = require("../utils/pagination");
 
 function createInvoicesRouter() {
   const router = express.Router();
@@ -27,8 +28,9 @@ function createInvoicesRouter() {
       }
       if (status && status !== "all") where += ` AND status='${escapeZcql(status)}'`;
 
+      const { limit, offset } = parseListPagination(req);
       const [rows, total] = await Promise.all([
-        findMany(req, "invoices", where, "CREATEDTIME DESC", Number(req.query.limit) || 50, Number(req.query.offset) || 0),
+        findMany(req, "invoices", where, "CREATEDTIME DESC", limit, offset),
         countRows(req, "invoices", where),
       ]);
 
@@ -37,7 +39,7 @@ function createInvoicesRouter() {
         const client = await findByRowId(req, "clients", inv.client_rowid);
         enriched.push({ ...inv, client, total_label: formatZAR(inv.total_cents) });
       }
-      return res.json({ ok: true, rows: enriched, total });
+      return res.json({ ok: true, rows: enriched, ...listMeta(limit, offset, total) });
     } catch (err) {
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
     }
