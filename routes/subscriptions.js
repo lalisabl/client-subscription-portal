@@ -14,6 +14,8 @@ const { requireAuth, requireStaff, safeStr } = require("../utils/authUtils");
 const { nowUtcForCatalyst, todayYmdSa, nextRunFromFrequency } = require("../utils/dateUtils");
 const {
   createOnsitePayment,
+  buildPaymentData,
+  processUrl,
   pauseSubscription,
   unpauseSubscription,
   cancelSubscription,
@@ -170,7 +172,9 @@ function createSubscriptionsRouter() {
       );
 
       const nameParts = safeStr(client.contact_person || client.name).split(/\s+/);
-      const { uuid } = await createOnsitePayment({
+      const mPaymentId = safeStr(invoice.m_payment_id) || `inv-${invoice.ROWID}-${Date.now()}`;
+      // One-time collect via PayFast; scheduling stays in our app (not PayFast recurring).
+      const paymentOpts = {
         return_url: `${portalBase}/subscriptions/${sub.ROWID}?paid=1`,
         cancel_url: `${portalBase}/subscriptions/${sub.ROWID}?cancelled=1`,
         notify_url: `${apiBase}/api/payfast/itn`,
@@ -178,23 +182,37 @@ function createSubscriptionsRouter() {
         name_last: nameParts.slice(1).join(" ") || "Account",
         email_address: safeStr(client.email),
         cell_number: safeStr(client.phone),
-        m_payment_id: safeStr(invoice.m_payment_id) || `inv-${invoice.ROWID}`,
+        m_payment_id: mPaymentId,
         amount: centsToZar(invoice.total_cents || sub.amount_cents),
         item_name: safeStr(plan?.name || "Subscription"),
         item_description: `Subscription ${sub.ROWID}`,
-        subscription: !sub.payfast_token,
-        billing_date: sub.start_date || todayYmdSa(),
-        recurring_amount: centsToZar(sub.amount_cents),
-        frequency: sub.frequency || 3,
-        cycles: sub.cycles || 0,
-      });
+        subscription: false,
+      };
 
-      // ensure m_payment_id stored
-      if (invoice.ROWID && !invoice.m_payment_id) {
-        await updateRow(req, "invoices", invoice.ROWID, { m_payment_id: `inv-${invoice.ROWID}` });
+      const paymentData = buildPaymentData(paymentOpts);
+
+      // Prefer hosted redirect fields (works on localhost HTTP). Onsite uuid is best-effort.
+      let uuid = null;
+      try {
+        const onsite = await createOnsitePayment(paymentOpts);
+        uuid = onsite.uuid;
+      } catch (onsiteErr) {
+        console.warn("onsite_uuid_unavailable", String(onsiteErr?.message || onsiteErr));
       }
 
-      return res.json({ ok: true, uuid, invoice_id: invoice.ROWID, m_payment_id: invoice.m_payment_id });
+      if (invoice.ROWID && safeStr(invoice.m_payment_id) !== mPaymentId) {
+        await updateRow(req, "invoices", invoice.ROWID, { m_payment_id: mPaymentId });
+      }
+
+      return res.json({
+        ok: true,
+        uuid,
+        process_url: processUrl(),
+        payment_data: paymentData,
+        invoice_id: invoice.ROWID,
+        m_payment_id: mPaymentId,
+        mode: uuid ? "onsite_or_redirect" : "redirect",
+      });
     } catch (err) {
       console.error("checkout_error", err);
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
