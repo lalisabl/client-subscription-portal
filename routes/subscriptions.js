@@ -7,6 +7,7 @@ const {
   countRows,
   insertRow,
   updateRow,
+  deleteRow,
   escapeZcql,
   logActivity,
 } = require("../catalyst/datastore");
@@ -17,6 +18,7 @@ const { createInvoiceForSubscription } = require("../services/invoices");
 const { parseListPagination, listMeta } = require("../utils/pagination");
 const {
   ensurePaystackPlan,
+  preparePaystackForNewSubscription,
   cancelPaystackSubscriptionRemote,
   resumePaystackSubscriptionRemote,
   syncSubscriptionWithPaystack,
@@ -99,16 +101,13 @@ function createSubscriptionsRouter() {
       if (!plan) return res.status(400).json({ ok: false, error: "Plan not found" });
 
       try {
-        await ensurePaystackPlan(req, plan);
-        plan = await findByRowId(req, "plans", plan_rowid);
+        const ready = await preparePaystackForNewSubscription(req, { client, plan });
+        plan = ready.plan;
       } catch (psErr) {
         return res.status(502).json({
           ok: false,
-          error: `Paystack plan sync failed: ${String(psErr?.message || psErr)}`,
+          error: `Cannot create subscription: ${String(psErr?.message || psErr)}`,
         });
-      }
-      if (!safeStr(plan.paystack_plan_code)) {
-        return res.status(502).json({ ok: false, error: "Paystack plan code missing after sync" });
       }
 
       const start_date = safeStr(req.body?.start_date) || todayYmdSa();
@@ -131,12 +130,38 @@ function createSubscriptionsRouter() {
         updated_at: nowUtcForCatalyst(),
       });
 
-      const invoice = await createInvoiceForSubscription(req, {
-        subscription: { ...sub, ROWID: sub.ROWID },
-        client,
-        plan,
-        status: "sent",
-      });
+      let invoice;
+      try {
+        invoice = await createInvoiceForSubscription(req, {
+          subscription: { ...sub, ROWID: sub.ROWID },
+          client,
+          plan,
+          status: "sent",
+        });
+      } catch (invErr) {
+        await deleteRow(req, "subscriptions", sub.ROWID).catch(() => {});
+        return res.status(500).json({
+          ok: false,
+          error: `Subscription not created: invoice failed (${invErr?.message || invErr})`,
+        });
+      }
+
+      let paystack_checkout;
+      try {
+        paystack_checkout = await checkoutForSubscription(req, { ...sub, ROWID: sub.ROWID });
+        if (!paystack_checkout?.paystack_subscription_checkout) {
+          throw new Error("Paystack recurring checkout could not be prepared");
+        }
+      } catch (checkoutErr) {
+        await deleteRow(req, "subscriptions", sub.ROWID).catch(() => {});
+        if (invoice?.ROWID) {
+          await deleteRow(req, "invoices", invoice.ROWID).catch(() => {});
+        }
+        return res.status(502).json({
+          ok: false,
+          error: `Subscription not created: ${String(checkoutErr?.message || checkoutErr)}`,
+        });
+      }
 
       await logActivity(req, {
         actor_type: req.user.role,
@@ -152,8 +177,9 @@ function createSubscriptionsRouter() {
         subscription: sub,
         invoice,
         paystack_plan_code: plan.paystack_plan_code,
+        paystack_checkout,
         message:
-          "Local subscription created. Client must complete Pay with Paystack once to activate Paystack recurring billing.",
+          "Subscription created. Customer must complete Pay with Paystack once; Paystack will then create the recurring subscription (SUB_…).",
       });
     } catch (err) {
       console.error("subscription_create_error", err);
@@ -176,6 +202,18 @@ function createSubscriptionsRouter() {
       }
 
       const checkout = await checkoutForSubscription(req, sub);
+      if (
+        !checkout.paystack_subscription_checkout &&
+        !safeStr(sub.paystack_subscription_code) &&
+        safeStr(sub.status).toLowerCase() !== "cancelled"
+      ) {
+        return res.status(502).json({
+          ok: false,
+          error:
+            "Paystack recurring checkout could not be prepared (missing plan code?). Edit the plan, save to sync Paystack, then try again.",
+          checkout,
+        });
+      }
       return res.json({ ok: true, ...checkout });
     } catch (err) {
       console.error("checkout_error", err);

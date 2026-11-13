@@ -72,6 +72,38 @@ function metaSubscriptionRowId(data) {
 }
 
 /**
+ * Must pass before creating a portal subscription — ensures Paystack plan exists and client can checkout.
+ * (Paystack SUB_… is still created on first successful payment.)
+ */
+async function preparePaystackForNewSubscription(req, { client, plan }) {
+  if (!client) throw new Error("Client not found");
+  const email = safeStr(client.email);
+  if (!email || !email.includes("@")) {
+    throw new Error("Client must have an email before starting a Paystack subscription");
+  }
+  if (!plan) throw new Error("Plan not found");
+
+  await ensurePaystackPlan(req, plan);
+  const freshPlan = await findByRowId(req, "plans", plan.ROWID);
+  const planCode = safeStr(freshPlan?.paystack_plan_code);
+  if (!planCode) {
+    throw new Error("Paystack plan code missing — save the plan again or check Data Store column paystack_plan_code");
+  }
+
+  let remote;
+  try {
+    remote = await fetchPlan(planCode);
+  } catch (err) {
+    throw new Error(`Paystack plan ${planCode} could not be loaded: ${err?.message || err}`);
+  }
+  if (!remote || !safeStr(remote.plan_code)) {
+    throw new Error(`Paystack plan ${planCode} not found on Paystack`);
+  }
+
+  return { plan: freshPlan, planCode, remote };
+}
+
+/**
  * Create or update a Paystack plan for a Catalyst plan row. Requires `paystack_plan_code` on plans table.
  */
 async function ensurePaystackPlan(req, plan) {
@@ -91,14 +123,18 @@ async function ensurePaystackPlan(req, plan) {
   let planCode = existingCode;
 
   if (existingCode) {
-    await updatePlan(existingCode, {
-      name,
-      amount,
-      interval,
-      currency,
-      invoice_limit,
-      update_existing_subscriptions: false,
-    });
+    try {
+      await updatePlan(existingCode, {
+        name,
+        amount,
+        interval,
+        currency,
+        invoice_limit,
+        update_existing_subscriptions: false,
+      });
+    } catch (err) {
+      console.error("paystack_plan_update_skipped", existingCode, err?.message || err);
+    }
   } else {
     const created = await createPlan({
       name,
@@ -128,14 +164,18 @@ async function ensurePaystackPlan(req, plan) {
           portal_cents: amount,
           paystack_cents: remoteAmount,
         });
-        await updatePlan(planCode, {
-          name,
-          amount,
-          interval,
-          currency,
-          invoice_limit,
-          update_existing_subscriptions: true,
-        });
+        try {
+          await updatePlan(planCode, {
+            name,
+            amount,
+            interval,
+            currency,
+            invoice_limit,
+            update_existing_subscriptions: true,
+          });
+        } catch (fixErr) {
+          console.error("paystack_plan_amount_fix_failed", fixErr?.message || fixErr);
+        }
       }
     } catch (err) {
       console.error("paystack_plan_verify_failed", err);
@@ -332,6 +372,7 @@ module.exports = {
   mapPaystackSubStatus,
   metaSubscriptionRowId,
   parseMetadata,
+  preparePaystackForNewSubscription,
   ensurePaystackPlan,
   findSubscriptionForPaystackEvent,
   applyPaystackSubscriptionSnapshot,

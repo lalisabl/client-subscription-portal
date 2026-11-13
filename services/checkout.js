@@ -78,8 +78,7 @@ async function checkoutForSubscription(req, sub) {
     invoice = await createInvoiceForSubscription(req, { subscription: sub, client, plan, status: "sent" });
   }
 
-  const linkedToPaystack = !safeStr(sub.paystack_subscription_code);
-  const usePaystackSubscription = linkedToPaystack && safeStr(sub.status).toLowerCase() !== "cancelled";
+  const usePaystackSubscription = shouldUsePaystackSubscriptionCheckout(sub);
 
   return buildPaystackCheckout(req, {
     invoice,
@@ -89,6 +88,14 @@ async function checkoutForSubscription(req, sub) {
     returnPath: `/subscriptions/${sub.ROWID}?paid=1`,
     usePaystackSubscription,
   });
+}
+
+function shouldUsePaystackSubscriptionCheckout(sub) {
+  if (!sub) return false;
+  if (safeStr(sub.paystack_subscription_code)) return false;
+  const st = safeStr(sub.status).toLowerCase();
+  if (st === "cancelled") return false;
+  return true;
 }
 
 async function checkoutForInvoice(req, invoice) {
@@ -103,10 +110,13 @@ async function checkoutForInvoice(req, invoice) {
     plan,
     sub,
     returnPath: `/invoices/${invoice.ROWID}?paid=1`,
+    usePaystackSubscription: shouldUsePaystackSubscriptionCheckout(sub),
   });
 }
 
 module.exports = {
+  buildPaystackCheckout,
   checkoutForSubscription,
   checkoutForInvoice,
+  shouldUsePaystackSubscriptionCheckout,
 };
