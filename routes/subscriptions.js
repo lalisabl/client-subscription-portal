@@ -309,7 +309,7 @@ function createSubscriptionsRouter() {
         return res.status(502).json({
           ok: false,
           error: alreadyCancelled
-            ? "Could not disable Paystack subscription. Use Retry Paystack cancel with code SUB_… from the dashboard, or cancel in Paystack."
+            ? "Could not disable Paystack subscription. Use Sync billing with code SUB_… from Paystack, or cancel there manually."
             : "No Paystack subscription found for this client/plan — check client email matches Paystack and plan is linked.",
           paystack,
           subscription: await findByRowId(req, "subscriptions", sub.ROWID),

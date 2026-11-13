@@ -79,7 +79,10 @@ function createPortalRouter() {
         paystack = await cancelPaystackSubscriptionRemote(req, sub);
       } catch (psErr) {
         console.error("portal_paystack_cancel_failed", psErr);
-        return res.status(502).json({ ok: false, error: String(psErr?.message || psErr) });
+        return res.status(502).json({
+          ok: false,
+          error: "We could not update your billing profile. Please try again or contact Manvic support.",
+        });
       }
 
       await updateRow(req, "subscriptions", sub.ROWID, { status: "cancelled", updated_at: nowUtcForCatalyst() });
