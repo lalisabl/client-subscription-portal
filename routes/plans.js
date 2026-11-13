@@ -14,6 +14,7 @@ const { requireAuth, requireStaff, safeStr } = require("../utils/authUtils");
 const { nowUtcForCatalyst } = require("../utils/dateUtils");
 const { parseListPagination, listMeta } = require("../utils/pagination");
 const { ensurePaystackPlan } = require("../services/paystackSubscriptions");
+const { centsFromStore, zarToCents } = require("../utils/money");
 
 function createPlansRouter() {
   const router = express.Router();
@@ -54,11 +55,14 @@ function createPlansRouter() {
       const body = req.body || {};
       const name = safeStr(body.name);
       const product_rowid = safeStr(body.product_rowid);
-      const amount_cents = Math.round(Number(body.amount_cents));
+      const amount_cents =
+        body.amount_zar != null && body.amount_zar !== ""
+          ? zarToCents(body.amount_zar)
+          : centsFromStore(body.amount_cents);
       const frequency = Number(body.frequency || 3);
       if (!name || !product_rowid) return res.status(400).json({ ok: false, error: "Name and product are required" });
       if (!Number.isFinite(amount_cents) || amount_cents < 500) {
-        return res.status(400).json({ ok: false, error: "amount_cents must be at least 500 (R5.00)" });
+        return res.status(400).json({ ok: false, error: "Price must be at least R5.00" });
       }
       if (![3, 4, 5, 6].includes(frequency)) {
         return res.status(400).json({ ok: false, error: "frequency must be 3,4,5 or 6 (monthly…annual)" });
@@ -113,7 +117,11 @@ function createPlansRouter() {
       const body = req.body || {};
       const updates = {};
       if (body.name !== undefined) updates.name = safeStr(body.name);
-      if (body.amount_cents !== undefined) updates.amount_cents = Math.round(Number(body.amount_cents));
+      if (body.amount_zar != null && body.amount_zar !== "") {
+        updates.amount_cents = zarToCents(body.amount_zar);
+      } else if (body.amount_cents !== undefined) {
+        updates.amount_cents = centsFromStore(body.amount_cents);
+      }
       if (body.frequency !== undefined) updates.frequency = Number(body.frequency);
       if (body.cycles !== undefined) updates.cycles = Number(body.cycles);
       if (body.vat_inclusive !== undefined) updates.vat_inclusive = !!body.vat_inclusive;

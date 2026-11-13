@@ -181,6 +181,12 @@ async function fetchSubscription(codeOrId) {
   return json.data || {};
 }
 
+async function fetchPlan(planCode) {
+  const code = encodeURIComponent(safeStr(planCode));
+  const json = await paystackRequest("GET", `/plan/${code}`);
+  return json.data || {};
+}
+
 module.exports = {
   isTestMode,
   getSecretKey,
@@ -195,4 +201,5 @@ module.exports = {
   disableSubscription,
   enableSubscription,
   fetchSubscription,
+  fetchPlan,
 };

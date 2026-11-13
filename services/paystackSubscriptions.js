@@ -3,11 +3,13 @@
 const { findByRowId, findOne, updateRow, escapeZcql } = require("../catalyst/datastore");
 const { safeStr } = require("../utils/authUtils");
 const { nowUtcForCatalyst, nextRunFromFrequency } = require("../utils/dateUtils");
+const { centsFromStore } = require("../utils/money");
 const {
   createPlan,
   updatePlan,
   disableSubscription,
   enableSubscription,
+  fetchPlan,
 } = require("./paystack");
 
 function frequencyToPaystackInterval(frequency) {
@@ -74,8 +76,10 @@ function metaSubscriptionRowId(data) {
  */
 async function ensurePaystackPlan(req, plan) {
   if (!plan) throw new Error("Plan missing");
-  const amount = Math.round(Number(plan.amount_cents));
-  if (!Number.isFinite(amount) || amount < 100) throw new Error("Plan amount invalid for Paystack");
+  const amount = centsFromStore(plan.amount_cents);
+  if (!Number.isFinite(amount) || amount < 100) {
+    throw new Error("Plan amount invalid for Paystack (use cents, e.g. R99 = 9900)");
+  }
 
   const interval = frequencyToPaystackInterval(plan.frequency);
   const currency = safeStr(plan.currency) || "ZAR";
@@ -111,6 +115,30 @@ async function ensurePaystackPlan(req, plan) {
       await updateRow(req, "plans", plan.ROWID, { paystack_plan_code: planCode });
     } catch (err) {
       console.error("plan_paystack_code_save_failed", err);
+    }
+  }
+
+  if (planCode) {
+    try {
+      const remote = await fetchPlan(planCode);
+      const remoteAmount = Math.round(Number(remote.amount));
+      if (remoteAmount > 0 && remoteAmount !== amount) {
+        console.warn("paystack_plan_amount_mismatch", {
+          plan_code: planCode,
+          portal_cents: amount,
+          paystack_cents: remoteAmount,
+        });
+        await updatePlan(planCode, {
+          name,
+          amount,
+          interval,
+          currency,
+          invoice_limit,
+          update_existing_subscriptions: true,
+        });
+      }
+    } catch (err) {
+      console.error("paystack_plan_verify_failed", err);
     }
   }
 
