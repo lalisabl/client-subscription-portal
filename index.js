@@ -17,6 +17,7 @@ const { createReportsRouter } = require("./routes/reports");
 const { createActivityRouter } = require("./routes/activity");
 const { createSettingsRouter } = require("./routes/settings");
 const { createPortalRouter } = require("./routes/portal");
+const { createNotificationsRouter } = require("./routes/notifications");
 
 const app = express();
 
@@ -99,6 +100,7 @@ app.use(createReportsRouter());
 app.use(createActivityRouter());
 app.use(createSettingsRouter());
 app.use(createPortalRouter());
+app.use(createNotificationsRouter());
 
 app.use((err, req, res, next) => {
   console.error("unhandled_error", err);

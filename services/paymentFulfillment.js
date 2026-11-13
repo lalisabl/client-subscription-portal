@@ -77,6 +77,7 @@ async function fulfillSuccessfulPayment(req, invoice, { reference, providerId, a
         invoiceNumber: invoice.invoice_number,
         amountLabel: formatZAR(invoice.total_cents),
         req,
+        invoiceId: String(invoice.ROWID),
       });
     }
   } catch (mailErr) {

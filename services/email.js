@@ -13,8 +13,6 @@ function isSmtpConfigured() {
 
 function getTransporter() {
   if (!isSmtpConfigured()) return null;
-  // Short timeouts so AppSail (~30s request limit) fails with a clear SMTP
-  // error instead of hanging until EXECUTION_TIME_EXCEEDED.
   const timeoutMs = Number(process.env.SMTP_TIMEOUT_MS || 10000);
   return nodemailer.createTransport({
     host: safeStr(process.env.SMTP_HOST),
@@ -36,7 +34,17 @@ function fromAddress() {
   return `"${name}" <${email}>`;
 }
 
-async function sendEmail({ to, subject, html, text, attachments, template = "generic", related_type = "", related_id = "", req = null }) {
+async function sendEmail({
+  to,
+  subject,
+  html,
+  text,
+  attachments,
+  template = "generic",
+  related_type = "",
+  related_id = "",
+  req = null,
+}) {
   const transporter = getTransporter();
   const log = async (status, messageId = "", error_message = "") => {
     if (!req) return;
@@ -53,7 +61,6 @@ async function sendEmail({ to, subject, html, text, attachments, template = "gen
         related_type,
         related_id,
       };
-      // Omit DateTime when unset — Catalyst rejects empty strings for datetime columns.
       if (status === "SENT") logRow.sent_at = nowUtcForCatalyst();
       await insertRow(req, "notification_logs", logRow);
     } catch (e) {
@@ -63,7 +70,7 @@ async function sendEmail({ to, subject, html, text, attachments, template = "gen
 
   if (!transporter) {
     console.warn("SMTP not configured — email skipped:", subject, "→", to);
-    await log("SKIPPED");
+    await log("SKIPPED", "", "SMTP not configured");
     return { ok: false, skipped: true, messageId: "" };
   }
   try {
@@ -83,7 +90,7 @@ async function sendEmail({ to, subject, html, text, attachments, template = "gen
   }
 }
 
-async function sendClientCredentialsEmail({ to, name, email, password, loginUrl }) {
+async function sendClientCredentialsEmail({ to, name, email, password, loginUrl, req }) {
   const subject = "Your Manvic Client Portal login";
   const html = `
     <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111">
@@ -97,10 +104,10 @@ async function sendClientCredentialsEmail({ to, name, email, password, loginUrl 
       <p>— Manvic Distributors</p>
     </div>
   `;
-  return sendEmail({ to, subject, html });
+  return sendEmail({ to, subject, html, template: "client_credentials", req });
 }
 
-async function sendInvoiceEmail({ to, name, invoiceNumber, pdfBuffer, portalUrl }) {
+async function sendInvoiceEmail({ to, name, invoiceNumber, pdfBuffer, portalUrl, req, invoiceId = "" }) {
   const subject = `Invoice ${invoiceNumber} from Manvic`;
   const html = `
     <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111">
@@ -114,13 +121,17 @@ async function sendInvoiceEmail({ to, name, invoiceNumber, pdfBuffer, portalUrl 
     to,
     subject,
     html,
+    template: "invoice",
+    related_type: "invoice",
+    related_id: safeStr(invoiceId),
+    req,
     attachments: pdfBuffer
       ? [{ filename: `${invoiceNumber}.pdf`, content: pdfBuffer, contentType: "application/pdf" }]
       : undefined,
   });
 }
 
-async function sendPaymentReceiptEmail({ to, name, invoiceNumber, amountLabel }) {
+async function sendPaymentReceiptEmail({ to, name, invoiceNumber, amountLabel, req, invoiceId = "" }) {
   const subject = `Payment received — ${invoiceNumber}`;
   const html = `
     <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111">
@@ -130,10 +141,18 @@ async function sendPaymentReceiptEmail({ to, name, invoiceNumber, amountLabel })
       <p>— Manvic Distributors</p>
     </div>
   `;
-  return sendEmail({ to, subject, html });
+  return sendEmail({
+    to,
+    subject,
+    html,
+    template: "payment_receipt",
+    related_type: "invoice",
+    related_id: safeStr(invoiceId),
+    req,
+  });
 }
 
-async function sendPasswordResetEmail({ to, resetUrl, ttlMinutes }) {
+async function sendPasswordResetEmail({ to, resetUrl, ttlMinutes, req }) {
   const subject = "Reset your Manvic portal password";
   const html = `
     <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111">
@@ -142,7 +161,7 @@ async function sendPasswordResetEmail({ to, resetUrl, ttlMinutes }) {
       <p>If you did not request this, you can ignore this email.</p>
     </div>
   `;
-  return sendEmail({ to, subject, html });
+  return sendEmail({ to, subject, html, template: "password_reset", req });
 }
 
 module.exports = {

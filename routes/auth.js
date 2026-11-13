@@ -139,7 +139,7 @@ function createAuthRouter() {
         const token = signResetToken(email);
         const base = safeStr(process.env.PORTAL_BASE_URL || "http://localhost:5173").replace(/\/+$/, "");
         const resetUrl = `${base}/reset-password?token=${encodeURIComponent(token)}`;
-        await sendPasswordResetEmail({ to: email, resetUrl, ttlMinutes: TOKEN_TTL_MINUTES });
+        await sendPasswordResetEmail({ to: email, resetUrl, ttlMinutes: TOKEN_TTL_MINUTES, req });
       }
       return res.status(200).json({
         ok: true,

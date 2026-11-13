@@ -106,6 +106,8 @@ function createInvoicesRouter() {
         invoiceNumber: invoice.invoice_number,
         pdfBuffer: pdf,
         portalUrl,
+        req,
+        invoiceId: String(invoice.ROWID),
       });
       await logActivity(req, {
         actor_type: req.user.role,

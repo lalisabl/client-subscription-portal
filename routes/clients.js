@@ -129,6 +129,7 @@ function createClientsRouter() {
               email,
               password,
               loginUrl,
+              req,
             });
           } catch (mailErr) {
             console.error("client_credentials_email_failed", String(mailErr?.message || mailErr));
@@ -200,6 +201,7 @@ function createClientsRouter() {
           email,
           password,
           loginUrl,
+          req,
         });
       } catch (mailErr) {
         console.error("portal_login_email_failed", String(mailErr?.message || mailErr));
