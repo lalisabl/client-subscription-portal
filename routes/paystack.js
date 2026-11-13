@@ -80,7 +80,10 @@ async function processSubscriptionEvent(req, event, data, eventRow) {
     } else if (event === "subscription.disable") {
       await syncPaystackSubscriptionStatus(req, data, "cancelled");
     } else if (event === "subscription.not_renew") {
-      await syncPaystackSubscriptionStatus(req, data, "paused");
+      const sub = await findSubscriptionForPaystackEvent(req, data);
+      const target =
+        sub && safeStr(sub.status).toLowerCase() === "cancelled" ? "cancelled" : "paused";
+      await syncPaystackSubscriptionStatus(req, data, target);
     } else if (event === "invoice.create") {
       await ensureInvoiceForPaystackInvoiceEvent(req, data);
     } else if (event === "invoice.payment_failed") {

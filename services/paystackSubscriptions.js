@@ -259,6 +259,65 @@ async function resumePaystackSubscriptionRemote(req, sub) {
   return { skipped: false, code };
 }
 
+/**
+ * Fetch Paystack subscription; optionally re-run disable when portal is cancelled/paused but Paystack still renews.
+ */
+async function syncSubscriptionWithPaystack(req, sub, { retryDisable = true } = {}) {
+  const code = safeStr(sub.paystack_subscription_code);
+  if (!code) return { skipped: true, reason: "No Paystack subscription linked" };
+
+  await ensurePaystackSubscriptionTokens(req, sub);
+  const fresh = await findByRowId(req, "subscriptions", sub.ROWID);
+  const token = safeStr(fresh?.paystack_email_token);
+  let remote = await fetchSubscription(code);
+  let remoteStatus = safeStr(remote.status).toLowerCase();
+  const localStatus = safeStr(fresh.status).toLowerCase();
+
+  let disabled = false;
+  if (
+    retryDisable &&
+    token &&
+    (localStatus === "cancelled" || localStatus === "paused") &&
+    (remoteStatus === "active" || remoteStatus === "attention")
+  ) {
+    await disableSubscription({ code, token });
+    disabled = true;
+    remote = await fetchSubscription(code);
+    remoteStatus = safeStr(remote.status).toLowerCase();
+  }
+
+  const updates = {
+    updated_at: nowUtcForCatalyst(),
+    next_run_date: isoToYmd(remote.next_payment_date) || fresh.next_run_date,
+  };
+  if (token) updates.paystack_email_token = token;
+
+  if (localStatus === "cancelled") {
+    updates.status = "cancelled";
+  } else if (localStatus === "paused") {
+    updates.status = remoteStatus === "non-renewing" || remoteStatus === "non_renewing" ? "paused" : fresh.status;
+  } else {
+    updates.status = mapPaystackSubStatus(remote.status);
+  }
+
+  await updateRow(req, "subscriptions", fresh.ROWID, updates);
+  const updated = await findByRowId(req, "subscriptions", fresh.ROWID);
+
+  return {
+    skipped: false,
+    disabled,
+    paystack_status: remote.status,
+    paystack_non_renewing: remoteStatus === "non-renewing" || remoteStatus === "non_renewing",
+    subscription: updated,
+    message:
+      remoteStatus === "active" && localStatus === "cancelled" && !disabled
+        ? "Paystack still active — retry disable or check API keys"
+        : remoteStatus === "non-renewing" || remoteStatus === "non_renewing"
+          ? "Paystack will not charge again; dashboard may still show Active until the period ends"
+          : "",
+  };
+}
+
 /** After a successful charge, advance dates when not fully driven by Paystack webhooks yet. */
 function nextRunFallback(sub, data) {
   const fromPs = isoToYmd(data.next_payment_date || data.subscription?.next_payment_date);
@@ -281,5 +340,6 @@ module.exports = {
   ensurePaystackSubscriptionTokens,
   cancelPaystackSubscriptionRemote,
   resumePaystackSubscriptionRemote,
+  syncSubscriptionWithPaystack,
   nextRunFallback,
 };

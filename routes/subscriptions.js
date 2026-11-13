@@ -19,6 +19,7 @@ const {
   ensurePaystackPlan,
   cancelPaystackSubscriptionRemote,
   resumePaystackSubscriptionRemote,
+  syncSubscriptionWithPaystack,
 } = require("../services/paystackSubscriptions");
 
 function createSubscriptionsRouter() {
@@ -254,13 +255,28 @@ function createSubscriptionsRouter() {
         entity_rowid: String(sub.ROWID),
         summary: `Cancelled subscription ${sub.ROWID}`,
       });
-      return res.json({
-        ok: true,
-        subscription: await findByRowId(req, "subscriptions", sub.ROWID),
-        paystack,
-      });
+      const updated = await findByRowId(req, "subscriptions", sub.ROWID);
+      let sync = null;
+      try {
+        sync = await syncSubscriptionWithPaystack(req, updated, { retryDisable: false });
+      } catch (syncErr) {
+        console.error("paystack_sync_after_cancel", syncErr);
+      }
+      return res.json({ ok: true, subscription: updated, paystack, sync });
     } catch (err) {
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
+    }
+  });
+
+  /** Staff: align portal with Paystack (re-disable if portal cancelled but Paystack still active). */
+  router.post("/api/subscriptions/:id/paystack-sync", requireAuth, requireStaff, async (req, res) => {
+    try {
+      const sub = await findByRowId(req, "subscriptions", req.params.id);
+      if (!sub) return res.status(404).json({ ok: false, error: "Subscription not found" });
+      const result = await syncSubscriptionWithPaystack(req, sub, { retryDisable: true });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      return res.status(502).json({ ok: false, error: String(err?.message || err) });
     }
   });
 
