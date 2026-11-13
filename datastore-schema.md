@@ -279,4 +279,4 @@ clients ──Null──► payments.client_rowid
 1. Deploy AppSail (`manvic-api`).
 2. Set env vars from `.env.example`.
 3. Create admin user (insert into `users` with bcrypt hash).
-4. Point PayFast ITN `notify_url` to `https://<appsail-host>/api/payfast/itn`.
+4. Point Paystack webhook URL to `https://<appsail-host>/api/paystack/webhook`.

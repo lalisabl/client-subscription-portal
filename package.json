@@ -8,7 +8,7 @@
     "dev": "catalyst serve",
     "dev:node": "nodemon index.js",
     "hash-password": "node scripts/hash-password.js",
-    "test:payfast": "node scripts/test-payfast.js",
+    "test:paystack": "node scripts/test-paystack.js",
     "test:smtp": "node scripts/test-smtp.js"
   },
   "dependencies": {

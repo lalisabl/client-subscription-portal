@@ -51,7 +51,7 @@ function addYearsYmd(ymd, years) {
   return ymdFromParts(p.y + Number(years || 0), p.mo, p.d);
 }
 
-/** PayFast frequency: 3=monthly, 4=quarterly, 5=biannual, 6=annual */
+/** Billing frequency: 3=monthly, 4=quarterly, 5=biannual, 6=annual */
 function nextRunFromFrequency(frequency, fromYmd) {
   const base = fromYmd || todayYmdSa();
   const f = Number(frequency);

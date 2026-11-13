@@ -144,7 +144,9 @@ async function markInvoicePaid(req, invoice, paymentMeta = {}) {
   const rowId = invoice.ROWID || invoice.rowid;
   await updateRow(req, "invoices", rowId, {
     status: "paid",
-    payfast_payment_id: safeStr(paymentMeta.pf_payment_id || invoice.payfast_payment_id),
+    payfast_payment_id: safeStr(
+      paymentMeta.pf_payment_id || paymentMeta.provider_id || invoice.payfast_payment_id
+    ),
     paid_at: nowUtcForCatalyst(),
   });
   return findByRowId(req, "invoices", rowId);

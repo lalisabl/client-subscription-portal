@@ -4,7 +4,7 @@ const express = require("express");
 const { findMany, findOne, insertRow, updateRow, escapeZcql } = require("../catalyst/datastore");
 const { requireAuth, requireStaff, safeStr } = require("../utils/authUtils");
 const { isSmtpConfigured } = require("../services/email");
-const { getConfig } = require("../services/payfast");
+const { getSecretKey, isTestMode } = require("../services/paystack");
 
 function createSettingsRouter() {
   const router = express.Router();
@@ -50,13 +50,13 @@ function createSettingsRouter() {
 
   router.get("/api/settings/integrations-health", requireAuth, requireStaff, async (req, res) => {
     try {
-      const pf = getConfig();
+      const paystackKey = getSecretKey();
       const services = [
         {
-          key: "payfast",
-          name: "PayFast",
-          ready: !!(pf.merchantId && pf.merchantKey && pf.passphrase),
-          detail: pf.sandbox ? "Sandbox mode" : "Live mode",
+          key: "paystack",
+          name: "Paystack",
+          ready: !!paystackKey && paystackKey.startsWith("sk_"),
+          detail: isTestMode() ? "Test mode" : "Live mode",
         },
         {
           key: "smtp",

@@ -12,6 +12,7 @@ const { requireAuth, requireStaff, isStaff, safeStr } = require("../utils/authUt
 const { buildInvoicePdfBuffer, formatZAR } = require("../services/invoices");
 const { sendInvoiceEmail } = require("../services/email");
 const { parseListPagination, listMeta } = require("../utils/pagination");
+const { checkoutForInvoice } = require("../services/checkout");
 
 function createInvoicesRouter() {
   const router = express.Router();
@@ -116,6 +117,24 @@ function createInvoicesRouter() {
       });
       return res.json({ ok: true, result });
     } catch (err) {
+      return res.status(500).json({ ok: false, error: String(err?.message || err) });
+    }
+  });
+
+  router.post("/api/invoices/:id/checkout", requireAuth, async (req, res) => {
+    try {
+      const invoice = await findByRowId(req, "invoices", req.params.id);
+      if (!invoice) return res.status(404).json({ ok: false, error: "Invoice not found" });
+      if (!isStaff(req.user) && String(invoice.client_rowid) !== String(req.user.client_rowid)) {
+        return res.status(403).json({ ok: false, error: "Forbidden" });
+      }
+      const status = safeStr(invoice.status).toLowerCase();
+      if (status === "paid") return res.status(400).json({ ok: false, error: "Invoice is already paid" });
+
+      const checkout = await checkoutForInvoice(req, invoice);
+      return res.json({ ok: true, ...checkout });
+    } catch (err) {
+      console.error("invoice_checkout_error", err);
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
     }
   });

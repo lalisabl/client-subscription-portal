@@ -12,17 +12,7 @@ const {
 } = require("../catalyst/datastore");
 const { requireAuth, requireStaff, safeStr } = require("../utils/authUtils");
 const { nowUtcForCatalyst, todayYmdSa, nextRunFromFrequency } = require("../utils/dateUtils");
-const {
-  createOnsitePayment,
-  buildPaymentData,
-  processUrl,
-  pauseSubscription,
-  unpauseSubscription,
-  cancelSubscription,
-  updateSubscription,
-  centsToZar,
-  cardUpdateUrl,
-} = require("../services/payfast");
+const { checkoutForSubscription } = require("../services/checkout");
 const { createInvoiceForSubscription } = require("../services/invoices");
 const { parseListPagination, listMeta } = require("../utils/pagination");
 
@@ -145,7 +135,7 @@ function createSubscriptionsRouter() {
     }
   });
 
-  /** Create PayFast Onsite checkout for this subscription */
+  /** Initialize Paystack checkout for this subscription */
   router.post("/api/subscriptions/:id/checkout", requireAuth, async (req, res) => {
     try {
       const sub = await findByRowId(req, "subscriptions", req.params.id);
@@ -159,72 +149,8 @@ function createSubscriptionsRouter() {
         return res.status(403).json({ ok: false, error: "Forbidden" });
       }
 
-      const client = await findByRowId(req, "clients", sub.client_rowid);
-      const plan = await findByRowId(req, "plans", sub.plan_rowid);
-      if (!client) return res.status(400).json({ ok: false, error: "Client missing" });
-
-      // find unpaid invoice or create one
-      let invoices = await findMany(
-        req,
-        "invoices",
-        `subscription_rowid='${escapeZcql(sub.ROWID)}' AND status!='paid'`,
-        "CREATEDTIME DESC",
-        1,
-        0
-      );
-      let invoice = invoices[0];
-      if (!invoice) {
-        invoice = await createInvoiceForSubscription(req, { subscription: sub, client, plan, status: "sent" });
-      }
-
-      const portalBase = safeStr(process.env.PORTAL_BASE_URL || "http://localhost:5173").replace(/\/+$/, "");
-      const apiBase = safeStr(process.env.API_PUBLIC_URL || process.env.PORTAL_BASE_URL || "http://localhost:9000").replace(
-        /\/+$/,
-        ""
-      );
-
-      const nameParts = safeStr(client.contact_person || client.name).split(/\s+/);
-      const mPaymentId = safeStr(invoice.m_payment_id) || `inv-${invoice.ROWID}-${Date.now()}`;
-      // One-time collect via PayFast; scheduling stays in our app (not PayFast recurring).
-      const paymentOpts = {
-        return_url: `${portalBase}/subscriptions/${sub.ROWID}?paid=1`,
-        cancel_url: `${portalBase}/subscriptions/${sub.ROWID}?cancelled=1`,
-        notify_url: `${apiBase}/api/payfast/itn`,
-        name_first: nameParts[0] || "Client",
-        name_last: nameParts.slice(1).join(" ") || "Account",
-        email_address: safeStr(client.email),
-        cell_number: safeStr(client.phone),
-        m_payment_id: mPaymentId,
-        amount: centsToZar(invoice.total_cents || sub.amount_cents),
-        item_name: safeStr(plan?.name || "Subscription"),
-        item_description: `Subscription ${sub.ROWID}`,
-        subscription: false,
-      };
-
-      const paymentData = buildPaymentData(paymentOpts);
-
-      // Prefer hosted redirect fields (works on localhost HTTP). Onsite uuid is best-effort.
-      let uuid = null;
-      try {
-        const onsite = await createOnsitePayment(paymentOpts);
-        uuid = onsite.uuid;
-      } catch (onsiteErr) {
-        console.warn("onsite_uuid_unavailable", String(onsiteErr?.message || onsiteErr));
-      }
-
-      if (invoice.ROWID && safeStr(invoice.m_payment_id) !== mPaymentId) {
-        await updateRow(req, "invoices", invoice.ROWID, { m_payment_id: mPaymentId });
-      }
-
-      return res.json({
-        ok: true,
-        uuid,
-        process_url: processUrl(),
-        payment_data: paymentData,
-        invoice_id: invoice.ROWID,
-        m_payment_id: mPaymentId,
-        mode: uuid ? "onsite_or_redirect" : "redirect",
-      });
+      const checkout = await checkoutForSubscription(req, sub);
+      return res.json({ ok: true, ...checkout });
     } catch (err) {
       console.error("checkout_error", err);
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
@@ -235,9 +161,6 @@ function createSubscriptionsRouter() {
     try {
       const sub = await findByRowId(req, "subscriptions", req.params.id);
       if (!sub) return res.status(404).json({ ok: false, error: "Subscription not found" });
-      if (sub.payfast_token) {
-        await pauseSubscription(sub.payfast_token, Number(req.body?.cycles || 0));
-      }
       await updateRow(req, "subscriptions", sub.ROWID, { status: "paused", updated_at: nowUtcForCatalyst() });
       await logActivity(req, {
         actor_type: req.user.role,
@@ -257,7 +180,6 @@ function createSubscriptionsRouter() {
     try {
       const sub = await findByRowId(req, "subscriptions", req.params.id);
       if (!sub) return res.status(404).json({ ok: false, error: "Subscription not found" });
-      if (sub.payfast_token) await unpauseSubscription(sub.payfast_token);
       await updateRow(req, "subscriptions", sub.ROWID, { status: "active", updated_at: nowUtcForCatalyst() });
       return res.json({ ok: true, subscription: await findByRowId(req, "subscriptions", sub.ROWID) });
     } catch (err) {
@@ -269,7 +191,6 @@ function createSubscriptionsRouter() {
     try {
       const sub = await findByRowId(req, "subscriptions", req.params.id);
       if (!sub) return res.status(404).json({ ok: false, error: "Subscription not found" });
-      if (sub.payfast_token) await cancelSubscription(sub.payfast_token);
       await updateRow(req, "subscriptions", sub.ROWID, { status: "cancelled", updated_at: nowUtcForCatalyst() });
       await logActivity(req, {
         actor_type: req.user.role,
@@ -295,13 +216,6 @@ function createSubscriptionsRouter() {
 
       const amount_cents = Math.round(Number(plan.amount_cents));
       const frequency = Number(plan.frequency || 3);
-      if (sub.payfast_token) {
-        await updateSubscription(sub.payfast_token, {
-          amount: amount_cents,
-          frequency,
-          cycles: Number(plan.cycles || 0),
-        });
-      }
       await updateRow(req, "subscriptions", sub.ROWID, {
         plan_rowid: plan.ROWID,
         amount_cents,
@@ -318,17 +232,6 @@ function createSubscriptionsRouter() {
         summary: `Changed subscription plan to ${plan.name}`,
       });
       return res.json({ ok: true, subscription: await findByRowId(req, "subscriptions", sub.ROWID) });
-    } catch (err) {
-      return res.status(500).json({ ok: false, error: String(err?.message || err) });
-    }
-  });
-
-  router.get("/api/subscriptions/:id/card-update-url", requireAuth, async (req, res) => {
-    try {
-      const sub = await findByRowId(req, "subscriptions", req.params.id);
-      if (!sub?.payfast_token) return res.status(400).json({ ok: false, error: "No PayFast token yet" });
-      const portalBase = safeStr(process.env.PORTAL_BASE_URL || "http://localhost:5173").replace(/\/+$/, "");
-      return res.json({ ok: true, url: cardUpdateUrl(sub.payfast_token, `${portalBase}/subscriptions/${sub.ROWID}`) });
     } catch (err) {
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
     }

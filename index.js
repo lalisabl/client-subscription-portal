@@ -11,7 +11,7 @@ const { createPlansRouter } = require("./routes/plans");
 const { createSubscriptionsRouter } = require("./routes/subscriptions");
 const { createInvoicesRouter } = require("./routes/invoices");
 const { createPaymentsRouter } = require("./routes/payments");
-const { createPayfastRouter } = require("./routes/payfast");
+const { createPaystackRouter } = require("./routes/paystack");
 const { createDashboardRouter } = require("./routes/dashboard");
 const { createReportsRouter } = require("./routes/reports");
 const { createActivityRouter } = require("./routes/activity");
@@ -62,7 +62,7 @@ app.use((req, res, next) => {
   next();
 });
 
-/* Raw body for PayFast ITN signature verification */
+/* Raw body for Paystack webhook signature verification */
 app.use(
   express.json({
     verify: (req, res, buf) => {
@@ -93,7 +93,7 @@ app.use(createPlansRouter());
 app.use(createSubscriptionsRouter());
 app.use(createInvoicesRouter());
 app.use(createPaymentsRouter());
-app.use(createPayfastRouter());
+app.use(createPaystackRouter());
 app.use(createDashboardRouter());
 app.use(createReportsRouter());
 app.use(createActivityRouter());
