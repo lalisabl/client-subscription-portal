@@ -6,7 +6,11 @@ const { createInvoiceForSubscription } = require("./invoices");
 const { initializeTransaction } = require("./paystack");
 const { ensurePaystackPlan } = require("./paystackSubscriptions");
 
-async function buildPaystackCheckout(req, { invoice, client, plan, sub, returnPath, usePaystackSubscription = false }) {
+async function buildPaystackCheckout(
+  req,
+  { invoice, client, plan: planIn, sub, returnPath, usePaystackSubscription = false },
+) {
+  let plan = planIn;
   if (!client) throw new Error("Client missing");
   const email = safeStr(client.email);
   if (!email) throw new Error("Client email is required for online payment");

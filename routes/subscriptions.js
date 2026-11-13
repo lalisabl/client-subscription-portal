@@ -93,7 +93,7 @@ function createSubscriptionsRouter() {
         return res.status(400).json({ ok: false, error: "client_rowid and plan_rowid are required" });
       }
       const client = await findByRowId(req, "clients", client_rowid);
-      const plan = await findByRowId(req, "plans", plan_rowid);
+      let plan = await findByRowId(req, "plans", plan_rowid);
       if (!client) return res.status(400).json({ ok: false, error: "Client not found" });
       if (!plan) return res.status(400).json({ ok: false, error: "Plan not found" });
 
