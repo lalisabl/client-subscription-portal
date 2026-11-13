@@ -186,10 +186,12 @@ function createSubscriptionsRouter() {
     try {
       const sub = await findByRowId(req, "subscriptions", req.params.id);
       if (!sub) return res.status(404).json({ ok: false, error: "Subscription not found" });
+      let paystack = { skipped: true };
       try {
-        await cancelPaystackSubscriptionRemote(sub);
+        paystack = await cancelPaystackSubscriptionRemote(req, sub);
       } catch (psErr) {
         console.error("paystack_pause_failed", psErr);
+        return res.status(502).json({ ok: false, error: String(psErr?.message || psErr) });
       }
       await updateRow(req, "subscriptions", sub.ROWID, { status: "paused", updated_at: nowUtcForCatalyst() });
       await logActivity(req, {
@@ -200,7 +202,11 @@ function createSubscriptionsRouter() {
         entity_rowid: String(sub.ROWID),
         summary: `Paused subscription ${sub.ROWID}`,
       });
-      return res.json({ ok: true, subscription: await findByRowId(req, "subscriptions", sub.ROWID) });
+      return res.json({
+        ok: true,
+        subscription: await findByRowId(req, "subscriptions", sub.ROWID),
+        paystack,
+      });
     } catch (err) {
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
     }
@@ -210,13 +216,19 @@ function createSubscriptionsRouter() {
     try {
       const sub = await findByRowId(req, "subscriptions", req.params.id);
       if (!sub) return res.status(404).json({ ok: false, error: "Subscription not found" });
+      let paystack = { skipped: true };
       try {
-        await resumePaystackSubscriptionRemote(sub);
+        paystack = await resumePaystackSubscriptionRemote(req, sub);
       } catch (psErr) {
         console.error("paystack_unpause_failed", psErr);
+        return res.status(502).json({ ok: false, error: String(psErr?.message || psErr) });
       }
       await updateRow(req, "subscriptions", sub.ROWID, { status: "active", updated_at: nowUtcForCatalyst() });
-      return res.json({ ok: true, subscription: await findByRowId(req, "subscriptions", sub.ROWID) });
+      return res.json({
+        ok: true,
+        subscription: await findByRowId(req, "subscriptions", sub.ROWID),
+        paystack,
+      });
     } catch (err) {
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
     }
@@ -226,10 +238,12 @@ function createSubscriptionsRouter() {
     try {
       const sub = await findByRowId(req, "subscriptions", req.params.id);
       if (!sub) return res.status(404).json({ ok: false, error: "Subscription not found" });
+      let paystack = { skipped: true };
       try {
-        await cancelPaystackSubscriptionRemote(sub);
+        paystack = await cancelPaystackSubscriptionRemote(req, sub);
       } catch (psErr) {
         console.error("paystack_cancel_failed", psErr);
+        return res.status(502).json({ ok: false, error: String(psErr?.message || psErr) });
       }
       await updateRow(req, "subscriptions", sub.ROWID, { status: "cancelled", updated_at: nowUtcForCatalyst() });
       await logActivity(req, {
@@ -240,7 +254,11 @@ function createSubscriptionsRouter() {
         entity_rowid: String(sub.ROWID),
         summary: `Cancelled subscription ${sub.ROWID}`,
       });
-      return res.json({ ok: true, subscription: await findByRowId(req, "subscriptions", sub.ROWID) });
+      return res.json({
+        ok: true,
+        subscription: await findByRowId(req, "subscriptions", sub.ROWID),
+        paystack,
+      });
     } catch (err) {
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
     }

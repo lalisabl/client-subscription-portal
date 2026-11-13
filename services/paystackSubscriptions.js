@@ -223,20 +223,40 @@ async function syncPaystackSubscriptionStatus(req, data, localStatus) {
   return findByRowId(req, "subscriptions", sub.ROWID);
 }
 
-async function cancelPaystackSubscriptionRemote(sub) {
+async function ensurePaystackSubscriptionTokens(req, sub) {
   const code = safeStr(sub.paystack_subscription_code);
-  const token = safeStr(sub.paystack_email_token);
-  if (!code || !token) return { skipped: true, reason: "No Paystack subscription linked" };
-  await disableSubscription({ code, token });
-  return { skipped: false };
+  let token = safeStr(sub.paystack_email_token);
+  if (!code) return { code: "", token: "" };
+  if (!token) {
+    try {
+      const remote = await fetchSubscription(code);
+      token = safeStr(remote.email_token);
+      if (token && req && sub.ROWID) {
+        await updateRow(req, "subscriptions", sub.ROWID, { paystack_email_token: token });
+      }
+    } catch (err) {
+      console.error("paystack_fetch_subscription_failed", code, err);
+    }
+  }
+  return { code, token };
 }
 
-async function resumePaystackSubscriptionRemote(sub) {
-  const code = safeStr(sub.paystack_subscription_code);
-  const token = safeStr(sub.paystack_email_token);
-  if (!code || !token) return { skipped: true, reason: "No Paystack subscription linked" };
+async function cancelPaystackSubscriptionRemote(req, sub) {
+  const { code, token } = await ensurePaystackSubscriptionTokens(req, sub);
+  if (!code) return { skipped: true, reason: "No Paystack subscription linked" };
+  if (!token) {
+    throw new Error("Paystack subscription token missing — wait for webhook or retry after first payment");
+  }
+  await disableSubscription({ code, token });
+  return { skipped: false, code };
+}
+
+async function resumePaystackSubscriptionRemote(req, sub) {
+  const { code, token } = await ensurePaystackSubscriptionTokens(req, sub);
+  if (!code) return { skipped: true, reason: "No Paystack subscription linked" };
+  if (!token) throw new Error("Paystack subscription token missing");
   await enableSubscription({ code, token });
-  return { skipped: false };
+  return { skipped: false, code };
 }
 
 /** After a successful charge, advance dates when not fully driven by Paystack webhooks yet. */
@@ -258,6 +278,7 @@ module.exports = {
   applyPaystackSubscriptionSnapshot,
   syncPaystackSubscriptionOnCreate,
   syncPaystackSubscriptionStatus,
+  ensurePaystackSubscriptionTokens,
   cancelPaystackSubscriptionRemote,
   resumePaystackSubscriptionRemote,
   nextRunFallback,
