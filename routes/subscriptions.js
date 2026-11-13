@@ -15,6 +15,11 @@ const { nowUtcForCatalyst, todayYmdSa, nextRunFromFrequency } = require("../util
 const { checkoutForSubscription } = require("../services/checkout");
 const { createInvoiceForSubscription } = require("../services/invoices");
 const { parseListPagination, listMeta } = require("../utils/pagination");
+const {
+  ensurePaystackPlan,
+  cancelPaystackSubscriptionRemote,
+  resumePaystackSubscriptionRemote,
+} = require("../services/paystackSubscriptions");
 
 function createSubscriptionsRouter() {
   const router = express.Router();
@@ -92,6 +97,19 @@ function createSubscriptionsRouter() {
       if (!client) return res.status(400).json({ ok: false, error: "Client not found" });
       if (!plan) return res.status(400).json({ ok: false, error: "Plan not found" });
 
+      try {
+        await ensurePaystackPlan(req, plan);
+        plan = await findByRowId(req, "plans", plan_rowid);
+      } catch (psErr) {
+        return res.status(502).json({
+          ok: false,
+          error: `Paystack plan sync failed: ${String(psErr?.message || psErr)}`,
+        });
+      }
+      if (!safeStr(plan.paystack_plan_code)) {
+        return res.status(502).json({ ok: false, error: "Paystack plan code missing after sync" });
+      }
+
       const start_date = safeStr(req.body?.start_date) || todayYmdSa();
       const amount_cents = Math.round(Number(req.body?.amount_cents != null ? req.body.amount_cents : plan.amount_cents));
       const frequency = Number(req.body?.frequency != null ? req.body.frequency : plan.frequency || 3);
@@ -101,7 +119,7 @@ function createSubscriptionsRouter() {
         client_rowid,
         plan_rowid,
         status: "pending",
-        payfast_token: "",
+        paystack_authorization_code: "",
         amount_cents,
         frequency,
         cycles,
@@ -128,7 +146,14 @@ function createSubscriptionsRouter() {
         summary: `Created subscription for ${client.name} / ${plan.name}`,
       });
 
-      return res.status(201).json({ ok: true, subscription: sub, invoice });
+      return res.status(201).json({
+        ok: true,
+        subscription: sub,
+        invoice,
+        paystack_plan_code: plan.paystack_plan_code,
+        message:
+          "Local subscription created. Client must complete Pay with Paystack once to activate Paystack recurring billing.",
+      });
     } catch (err) {
       console.error("subscription_create_error", err);
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
@@ -161,6 +186,11 @@ function createSubscriptionsRouter() {
     try {
       const sub = await findByRowId(req, "subscriptions", req.params.id);
       if (!sub) return res.status(404).json({ ok: false, error: "Subscription not found" });
+      try {
+        await cancelPaystackSubscriptionRemote(sub);
+      } catch (psErr) {
+        console.error("paystack_pause_failed", psErr);
+      }
       await updateRow(req, "subscriptions", sub.ROWID, { status: "paused", updated_at: nowUtcForCatalyst() });
       await logActivity(req, {
         actor_type: req.user.role,
@@ -180,6 +210,11 @@ function createSubscriptionsRouter() {
     try {
       const sub = await findByRowId(req, "subscriptions", req.params.id);
       if (!sub) return res.status(404).json({ ok: false, error: "Subscription not found" });
+      try {
+        await resumePaystackSubscriptionRemote(sub);
+      } catch (psErr) {
+        console.error("paystack_unpause_failed", psErr);
+      }
       await updateRow(req, "subscriptions", sub.ROWID, { status: "active", updated_at: nowUtcForCatalyst() });
       return res.json({ ok: true, subscription: await findByRowId(req, "subscriptions", sub.ROWID) });
     } catch (err) {
@@ -191,6 +226,11 @@ function createSubscriptionsRouter() {
     try {
       const sub = await findByRowId(req, "subscriptions", req.params.id);
       if (!sub) return res.status(404).json({ ok: false, error: "Subscription not found" });
+      try {
+        await cancelPaystackSubscriptionRemote(sub);
+      } catch (psErr) {
+        console.error("paystack_cancel_failed", psErr);
+      }
       await updateRow(req, "subscriptions", sub.ROWID, { status: "cancelled", updated_at: nowUtcForCatalyst() });
       await logActivity(req, {
         actor_type: req.user.role,

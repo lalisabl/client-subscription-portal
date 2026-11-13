@@ -110,6 +110,7 @@ Or insert manually: hash with `node scripts/hash-password.js 'YourPassword'`, th
 | vat_inclusive | Boolean | Default `true` | — | — | |
 | features_json | Text | — | — | — | JSON |
 | active | Boolean | Default `true` | — | — | |
+| paystack_plan_code | Var Char | 80 | — | — | Paystack `PLN_…` (recurring) |
 | created_at | DateTime | — | — | — | |
 
 ---
@@ -121,7 +122,9 @@ Or insert manually: hash with `node scripts/hash-password.js 'YourPassword'`, th
 | client_rowid | **Foreign Key** | Search Index | **`clients`** | **Cascade** | remove subs when client is deleted |
 | plan_rowid | **Foreign Key** | — | **`plans`** | **Null** | keep sub history if plan is removed |
 | status | Var Char | 20 · Search Index | — | — | `pending` \| `active` \| `paused` \| `cancelled` \| `failed` \| `trial` |
-| payfast_token | Var Char | 80 | — | — | from ITN after first payment |
+| paystack_authorization_code | Var Char | 80 | — | — | Paystack `AUTH_…` (reusable card) after pay |
+| paystack_subscription_code | Var Char | 80 | — | — | Paystack `SUB_…` |
+| paystack_email_token | Var Char | 80 | — | — | Paystack email token (enable/disable sub) |
 | amount_cents | BigInt | — | — | — | |
 | frequency | Int | — | — | — | |
 | cycles | Int | Default `0` | — | — | |
@@ -130,6 +133,8 @@ Or insert manually: hash with `node scripts/hash-password.js 'YourPassword'`, th
 | created_by | Var Char | 120 | — | — | staff email |
 | created_at | DateTime | — | — | — | |
 | updated_at | DateTime | — | — | — | |
+
+**Migration:** If you still have a legacy `payfast_token` column, add `paystack_authorization_code`, copy values across in the Catalyst console or Data Store export, then delete `payfast_token`.
 
 ---
 

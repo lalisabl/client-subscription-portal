@@ -57,16 +57,18 @@ async function initializeTransaction(opts) {
   const amountCents = Math.round(Number(opts.amountCents || 0));
   if (!email || !email.includes("@")) throw new Error("Customer email is required for Paystack");
   if (!reference) throw new Error("Payment reference is required");
-  if (amountCents < 100) throw new Error("Amount must be at least R1.00");
+  const planCode = safeStr(opts.planCode);
+  if (!planCode && amountCents < 100) throw new Error("Amount must be at least R1.00");
 
   const payload = {
     email,
     amount: amountCents,
     reference,
-    currency: "ZAR",
+    currency: safeStr(opts.currency) || "ZAR",
     callback_url: safeStr(opts.callbackUrl),
     metadata: opts.metadata || {},
   };
+  if (planCode) payload.plan = planCode;
 
   const json = await paystackRequest("POST", "/transaction/initialize", payload);
   const data = json.data || {};
@@ -128,6 +130,57 @@ function zarToCents(zar) {
   return Math.round(Number(zar || 0) * 100);
 }
 
+async function createPlan({ name, amount, interval, currency = "ZAR", invoice_limit, send_invoices = false, send_sms = false }) {
+  const payload = {
+    name: safeStr(name),
+    amount: Math.round(Number(amount)),
+    interval: safeStr(interval),
+    currency: safeStr(currency) || "ZAR",
+    send_invoices: !!send_invoices,
+    send_sms: !!send_sms,
+  };
+  if (invoice_limit != null && Number(invoice_limit) > 0) payload.invoice_limit = Number(invoice_limit);
+  const json = await paystackRequest("POST", "/plan", payload);
+  return json.data || {};
+}
+
+async function updatePlan(planCode, { name, amount, interval, currency, invoice_limit, update_existing_subscriptions }) {
+  const code = encodeURIComponent(safeStr(planCode));
+  const payload = {};
+  if (name != null) payload.name = safeStr(name);
+  if (amount != null) payload.amount = Math.round(Number(amount));
+  if (interval != null) payload.interval = safeStr(interval);
+  if (currency != null) payload.currency = safeStr(currency);
+  if (invoice_limit != null) payload.invoice_limit = Number(invoice_limit);
+  if (update_existing_subscriptions != null) {
+    payload.update_existing_subscriptions = !!update_existing_subscriptions;
+  }
+  const json = await paystackRequest("PUT", `/plan/${code}`, payload);
+  return json.data || {};
+}
+
+async function disableSubscription({ code, token }) {
+  const json = await paystackRequest("POST", "/subscription/disable", {
+    code: safeStr(code),
+    token: safeStr(token),
+  });
+  return json;
+}
+
+async function enableSubscription({ code, token }) {
+  const json = await paystackRequest("POST", "/subscription/enable", {
+    code: safeStr(code),
+    token: safeStr(token),
+  });
+  return json;
+}
+
+async function fetchSubscription(codeOrId) {
+  const id = encodeURIComponent(safeStr(codeOrId));
+  const json = await paystackRequest("GET", `/subscription/${id}`);
+  return json.data || {};
+}
+
 module.exports = {
   isTestMode,
   getSecretKey,
@@ -137,4 +190,9 @@ module.exports = {
   verifyWebhookSignature,
   centsToZar,
   zarToCents,
+  createPlan,
+  updatePlan,
+  disableSubscription,
+  enableSubscription,
+  fetchSubscription,
 };

@@ -10,6 +10,7 @@ const {
 } = require("../catalyst/datastore");
 const { safeStr } = require("../utils/authUtils");
 const { nowUtcForCatalyst, nextRunFromFrequency, safeJsonStringify } = require("../utils/dateUtils");
+const { nextRunFallback, applyPaystackSubscriptionSnapshot } = require("./paystackSubscriptions");
 const { markInvoicePaid, formatZAR } = require("./invoices");
 const { sendPaymentReceiptEmail } = require("./email");
 
@@ -58,13 +59,19 @@ async function fulfillSuccessfulPayment(req, invoice, { reference, providerId, a
     const sub = await findByRowId(req, "subscriptions", invoice.subscription_rowid);
     if (sub) {
       const authCode = safeStr(rawPayload?.authorization?.authorization_code);
+      const subFromPs = rawPayload?.subscription;
       const updates = {
         status: "active",
         updated_at: nowUtcForCatalyst(),
-        next_run_date: nextRunFromFrequency(sub.frequency, sub.next_run_date || sub.start_date),
+        next_run_date: nextRunFallback(sub, { ...rawPayload, subscription: subFromPs }),
       };
-      if (authCode) updates.payfast_token = authCode;
+      if (authCode) updates.paystack_authorization_code = authCode;
+      const psCode = safeStr(subFromPs?.subscription_code);
+      const psToken = safeStr(subFromPs?.email_token);
+      if (psCode) updates.paystack_subscription_code = psCode;
+      if (psToken) updates.paystack_email_token = psToken;
       await updateRow(req, "subscriptions", sub.ROWID, updates);
+      if (subFromPs) await applyPaystackSubscriptionSnapshot(req, sub, subFromPs);
     }
   }
 

@@ -4,8 +4,9 @@ const { findByRowId, findMany, updateRow, escapeZcql } = require("../catalyst/da
 const { safeStr } = require("../utils/authUtils");
 const { createInvoiceForSubscription } = require("./invoices");
 const { initializeTransaction } = require("./paystack");
+const { ensurePaystackPlan } = require("./paystackSubscriptions");
 
-async function buildPaystackCheckout(req, { invoice, client, plan, sub, returnPath }) {
+async function buildPaystackCheckout(req, { invoice, client, plan, sub, returnPath, usePaystackSubscription = false }) {
   if (!client) throw new Error("Client missing");
   const email = safeStr(client.email);
   if (!email) throw new Error("Client email is required for online payment");
@@ -20,15 +21,27 @@ async function buildPaystackCheckout(req, { invoice, client, plan, sub, returnPa
   const callbackPath = safeStr(returnPath) || `/invoices/${invoice.ROWID}?paid=1`;
   const callbackUrl = `${portalBase}${callbackPath.startsWith("/") ? callbackPath : `/${callbackPath}`}`;
 
+  let planCode = "";
+  if (usePaystackSubscription && plan) {
+    planCode = safeStr(plan.paystack_plan_code);
+    if (!planCode) {
+      planCode = await ensurePaystackPlan(req, plan);
+      plan = await findByRowId(req, "plans", plan.ROWID);
+    }
+  }
+
   const init = await initializeTransaction({
     email,
     amountCents: Number(invoice.total_cents || sub?.amount_cents || 0),
     reference,
     callbackUrl,
+    currency: safeStr(plan?.currency) || "ZAR",
+    planCode: usePaystackSubscription ? planCode : "",
     metadata: {
       invoice_rowid: String(invoice.ROWID),
       subscription_rowid: String(invoice.subscription_rowid || sub?.ROWID || ""),
       client_rowid: String(client.ROWID),
+      catalyst_subscription_rowid: String(sub?.ROWID || invoice.subscription_rowid || ""),
     },
   });
 
@@ -39,6 +52,8 @@ async function buildPaystackCheckout(req, { invoice, client, plan, sub, returnPa
     m_payment_id: reference,
     invoice_id: invoice.ROWID,
     plan_name: plan?.name,
+    paystack_subscription_checkout: !!usePaystackSubscription && !!planCode,
+    paystack_plan_code: planCode || undefined,
   };
 }
 
@@ -59,12 +74,16 @@ async function checkoutForSubscription(req, sub) {
     invoice = await createInvoiceForSubscription(req, { subscription: sub, client, plan, status: "sent" });
   }
 
+  const linkedToPaystack = !safeStr(sub.paystack_subscription_code);
+  const usePaystackSubscription = linkedToPaystack && safeStr(sub.status).toLowerCase() !== "cancelled";
+
   return buildPaystackCheckout(req, {
     invoice,
     client,
     plan,
     sub,
     returnPath: `/subscriptions/${sub.ROWID}?paid=1`,
+    usePaystackSubscription,
   });
 }
 

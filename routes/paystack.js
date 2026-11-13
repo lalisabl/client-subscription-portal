@@ -9,6 +9,13 @@ const {
   fulfillSuccessfulPayment,
   fulfillFailedPayment,
 } = require("../services/paymentFulfillment");
+const { resolveInvoiceForCharge, ensureInvoiceForPaystackInvoiceEvent } = require("../services/paystackBilling");
+const {
+  syncPaystackSubscriptionOnCreate,
+  syncPaystackSubscriptionStatus,
+  applyPaystackSubscriptionSnapshot,
+  findSubscriptionForPaystackEvent,
+} = require("../services/paystackSubscriptions");
 
 async function processChargeEvent(req, event, data, signatureValid, eventRow) {
   const reference = safeStr(data?.reference);
@@ -24,7 +31,15 @@ async function processChargeEvent(req, event, data, signatureValid, eventRow) {
     return;
   }
 
-  const invoice = await findOne(req, "invoices", `m_payment_id='${escapeZcql(reference)}'`);
+  let invoice = await findOne(req, "invoices", `m_payment_id='${escapeZcql(reference)}'`);
+  if (!invoice) {
+    try {
+      invoice = await resolveInvoiceForCharge(req, data);
+    } catch (err) {
+      console.error("resolve_invoice_for_charge", err);
+    }
+  }
+
   if (!invoice) {
     if (eventRow?.ROWID) {
       await updateRow(req, "payfast_webhook_events", eventRow.ROWID, {
@@ -58,6 +73,52 @@ async function processChargeEvent(req, event, data, signatureValid, eventRow) {
   }
 }
 
+async function processSubscriptionEvent(req, event, data, eventRow) {
+  try {
+    if (event === "subscription.create") {
+      await syncPaystackSubscriptionOnCreate(req, data);
+    } else if (event === "subscription.disable") {
+      await syncPaystackSubscriptionStatus(req, data, "cancelled");
+    } else if (event === "subscription.not_renew") {
+      await syncPaystackSubscriptionStatus(req, data, "paused");
+    } else if (event === "invoice.create") {
+      await ensureInvoiceForPaystackInvoiceEvent(req, data);
+    } else if (event === "invoice.payment_failed") {
+      const sub = await syncPaystackSubscriptionStatus(req, data, "failed");
+      if (sub && data?.transaction?.reference) {
+        const invoice = await findOne(
+          req,
+          "invoices",
+          `m_payment_id='${escapeZcql(data.transaction.reference)}'`,
+        );
+        if (invoice) {
+          await fulfillFailedPayment(req, invoice, {
+            reference: safeStr(data.transaction.reference),
+            providerId: safeStr(data.transaction.id || data.transaction.reference),
+            amountCents: Number(data.amount) || 0,
+            channel: "",
+            rawPayload: data,
+          });
+        }
+      }
+    } else if (event === "invoice.update" && data?.paid === true) {
+      const sub = await findSubscriptionForPaystackEvent(req, data);
+      if (sub) await applyPaystackSubscriptionSnapshot(req, sub, data.subscription || data);
+    }
+  } catch (err) {
+    console.error("paystack_subscription_event_error", event, err);
+    if (eventRow?.ROWID) {
+      await updateRow(req, "payfast_webhook_events", eventRow.ROWID, {
+        process_error: String(err?.message || err).slice(0, 500),
+      });
+    }
+  }
+
+  if (eventRow?.ROWID) {
+    await updateRow(req, "payfast_webhook_events", eventRow.ROWID, { processed: true });
+  }
+}
+
 function createPaystackRouter() {
   const router = express.Router();
 
@@ -71,12 +132,12 @@ function createPaystackRouter() {
       const body = req.body || {};
       const event = safeStr(body.event);
       const data = body.data || {};
-      const reference = safeStr(data.reference);
-      const providerId = safeStr(data.id || reference);
+      const reference = safeStr(data.reference || data.transaction?.reference);
+      const providerId = safeStr(data.id || data.transaction?.id || reference);
       const status = safeStr(data.status || event).toUpperCase();
 
       const recorded = await recordWebhookEvent(req, {
-        reference,
+        reference: reference || `${event}-${providerId}`,
         providerId,
         status,
         signatureValid,
@@ -95,7 +156,28 @@ function createPaystackRouter() {
         return res.status(401).json({ ok: false, error: "Invalid signature" });
       }
 
-      await processChargeEvent(req, event, data, signatureValid, recorded.row);
+      if (
+        event === "charge.success" ||
+        event === "transaction.success" ||
+        event === "charge.failed"
+      ) {
+        await processChargeEvent(req, event, data, signatureValid, recorded.row);
+      } else if (
+        event === "subscription.create" ||
+        event === "subscription.disable" ||
+        event === "subscription.not_renew" ||
+        event === "invoice.create" ||
+        event === "invoice.payment_failed" ||
+        event === "invoice.update"
+      ) {
+        await processSubscriptionEvent(req, event, data, recorded.row);
+      } else {
+        await updateRow(req, "payfast_webhook_events", recorded.row.ROWID, {
+          processed: true,
+          process_error: `Unhandled event: ${event || "unknown"}`,
+        });
+      }
+
       return res.status(200).json({ ok: true });
     } catch (err) {
       console.error("paystack_webhook_error", err);
@@ -111,7 +193,8 @@ function createPaystackRouter() {
 
       const data = await verifyTransaction(reference);
       const status = safeStr(data.status).toLowerCase();
-      const invoice = await findOne(req, "invoices", `m_payment_id='${escapeZcql(reference)}'`);
+      let invoice = await findOne(req, "invoices", `m_payment_id='${escapeZcql(reference)}'`);
+      if (!invoice) invoice = await resolveInvoiceForCharge(req, data);
       if (!invoice) return res.status(404).json({ ok: false, error: "Invoice not found for reference" });
 
       if (status === "success") {

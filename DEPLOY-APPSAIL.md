@@ -31,3 +31,15 @@ Note: any key still present in `app-config.json` on deploy will overwrite the co
 ## Live URLs vs local `.env`
 
 `PORTAL_BASE_URL` and `API_PUBLIC_URL` in `app-config.json` point at **Slate / AppSail**. Local `.env` may still use `localhost` — that is fine for `npm run dev:node`. Deploy uses the URLs in `app-config.json` for those keys unless you also set them in `.env` (inject script only updates the keys listed in `scripts/inject-app-config-env.js`).
+
+## Paystack recurring (subscriptions)
+
+Recurring billing uses **Paystack Plans + Subscriptions**, not an in-app cron.
+
+1. **Data Store columns** (see `datastore-schema.md`): add `paystack_plan_code` on `plans`; on `subscriptions` add `paystack_authorization_code`, `paystack_subscription_code`, and `paystack_email_token` (remove legacy `payfast_token` after copying values if any).
+2. **Plans**: creating or updating a plan syncs a Paystack plan (`PLN_…`).
+3. **Subscriptions**: creating a subscription syncs the plan, creates a local invoice, then the client’s first **Pay with Paystack** uses `plan` on initialize → Paystack owns renewals.
+4. **Webhook URL** (Paystack Dashboard → Developers → Webhooks):  
+   `https://<your-appsail-api>/api/paystack/webhook`  
+   Enable events: `charge.success`, `charge.failed`, `subscription.create`, `subscription.disable`, `subscription.not_renew`, `invoice.create`, `invoice.payment_failed`, `invoice.update`.
+5. After deploy, open **Settings** (or run a test subscription) once so existing plans without `paystack_plan_code` get synced via edit → save in Plans.

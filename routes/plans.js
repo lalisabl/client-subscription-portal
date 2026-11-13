@@ -13,6 +13,7 @@ const {
 const { requireAuth, requireStaff, safeStr } = require("../utils/authUtils");
 const { nowUtcForCatalyst } = require("../utils/dateUtils");
 const { parseListPagination, listMeta } = require("../utils/pagination");
+const { ensurePaystackPlan } = require("../services/paystackSubscriptions");
 
 function createPlansRouter() {
   const router = express.Router();
@@ -82,6 +83,14 @@ function createPlansRouter() {
         created_at: nowUtcForCatalyst(),
       });
 
+      let plan = row;
+      try {
+        await ensurePaystackPlan(req, { ...row, ROWID: row.ROWID, name, amount_cents, frequency, cycles });
+        plan = await findByRowId(req, "plans", row.ROWID);
+      } catch (psErr) {
+        console.error("paystack_plan_sync_failed", psErr);
+      }
+
       await logActivity(req, {
         actor_type: req.user.role,
         actor_email: req.user.email,
@@ -91,7 +100,7 @@ function createPlansRouter() {
         summary: `Created plan ${name}`,
       });
 
-      return res.status(201).json({ ok: true, plan: row });
+      return res.status(201).json({ ok: true, plan });
     } catch (err) {
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
     }
@@ -115,7 +124,13 @@ function createPlansRouter() {
       }
       if (body.product_rowid !== undefined) updates.product_rowid = safeStr(body.product_rowid);
       await updateRow(req, "plans", req.params.id, updates);
-      const plan = await findByRowId(req, "plans", req.params.id);
+      let plan = await findByRowId(req, "plans", req.params.id);
+      try {
+        await ensurePaystackPlan(req, plan);
+        plan = await findByRowId(req, "plans", req.params.id);
+      } catch (psErr) {
+        console.error("paystack_plan_sync_failed", psErr);
+      }
       return res.json({ ok: true, plan });
     } catch (err) {
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
