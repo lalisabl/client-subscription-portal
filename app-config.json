@@ -7,22 +7,23 @@
     "CORS_ORIGINS": "http://localhost:5173",
     "PORTAL_BASE_URL": "https://client-subscription--chplpfzo.onslate.com",
     "API_PUBLIC_URL": "https://manvic-api-10137288052.development.catalystappsail.com",
-    "JWT_SECRET": "dev-manvic-jwt-secret-change-me-32chars",
-    "INTERNAL_API_SECRET": "dev-manvic-internal-secret-32chars",
-    "PASSWORD_RESET_TOKEN_SECRET": "dev-manvic-password-reset-secret-32",
     "DEFAULT_VAT_RATE": "15",
     "INVOICE_PREFIX": "INV-",
-    "PAYSTACK_SECRET_KEY": "",
     "PAYSTACK_TEST_MODE": "true",
-    "PAYSTACK_WEBHOOK_SECRET": "",
     "SMTP_HOST": "mail.emarketingconcepts.co.za",
     "SMTP_PORT": "587",
-    "SMTP_USER": "dev@emarketingconcepts.co.za",
-    "SMTP_PASS": "lbG2*Vw1G?=k+!Xq",
     "SMTP_FROM_EMAIL": "dev@emarketingconcepts.co.za",
     "SMTP_FROM_NAME": "Manvic Client Portal",
-    "SMTP_SECURE": "false"
+    "SMTP_SECURE": "false",
+    "JWT_SECRET": "dev-manvic-jwt-secret-change-me-32chars",
+    "PAYSTACK_SECRET_KEY": "sk_test_1453db6f99ed63cd0ee817ef339784797b942a85",
+    "INTERNAL_API_SECRET": "dev-manvic-internal-secret-32chars",
+    "PASSWORD_RESET_TOKEN_SECRET": "dev-manvic-password-reset-secret-32",
+    "SMTP_USER": "dev@emarketingconcepts.co.za",
+    "SMTP_PASS": "lbG2*Vw1G?=k+!Xq"
   },
   "memory": 256,
-  "scripts": {}
+  "scripts": {
+    "predeploy": "node scripts/inject-app-config-env.js"
+  }
 }

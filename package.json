@@ -9,7 +9,9 @@
     "dev:node": "nodemon index.js",
     "hash-password": "node scripts/hash-password.js",
     "test:paystack": "node scripts/test-paystack.js",
-    "test:smtp": "node scripts/test-smtp.js"
+    "test:smtp": "node scripts/test-smtp.js",
+    "deploy:strip": "node scripts/strip-app-config-secrets.js",
+    "deploy": "catalyst deploy && npm run deploy:strip"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
