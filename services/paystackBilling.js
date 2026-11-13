@@ -6,6 +6,7 @@ const { createInvoiceForSubscription } = require("./invoices");
 const {
   findSubscriptionForPaystackEvent,
   metaSubscriptionRowId,
+  metaInvoiceRowId,
   applyPaystackSubscriptionSnapshot,
 } = require("./paystackSubscriptions");
 
@@ -15,6 +16,18 @@ async function resolveInvoiceForCharge(req, data) {
 
   let invoice = await findOne(req, "invoices", `m_payment_id='${escapeZcql(reference)}'`);
   if (invoice) return invoice;
+
+  const invoiceRowId = metaInvoiceRowId(data);
+  if (invoiceRowId) {
+    invoice = await findByRowId(req, "invoices", invoiceRowId);
+    if (invoice) {
+      await updateRow(req, "invoices", invoice.ROWID, {
+        m_payment_id: reference,
+        payfast_payment_id: safeStr(data.id || reference),
+      });
+      return findByRowId(req, "invoices", invoice.ROWID);
+    }
+  }
 
   const metaId = metaSubscriptionRowId(data);
   let sub = null;

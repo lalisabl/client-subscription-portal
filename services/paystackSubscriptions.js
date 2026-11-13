@@ -71,6 +71,11 @@ function metaSubscriptionRowId(data) {
   );
 }
 
+function metaInvoiceRowId(data) {
+  const meta = parseMetadata(data);
+  return safeStr(meta.invoice_rowid);
+}
+
 /**
  * Must pass before creating a portal subscription — ensures Paystack plan exists and client can checkout.
  * (Paystack SUB_… is still created on first successful payment.)
@@ -371,6 +376,7 @@ module.exports = {
   isoToYmd,
   mapPaystackSubStatus,
   metaSubscriptionRowId,
+  metaInvoiceRowId,
   parseMetadata,
   preparePaystackForNewSubscription,
   ensurePaystackPlan,

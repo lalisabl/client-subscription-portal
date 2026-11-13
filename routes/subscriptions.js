@@ -13,7 +13,11 @@ const {
 } = require("../catalyst/datastore");
 const { requireAuth, requireStaff, safeStr } = require("../utils/authUtils");
 const { nowUtcForCatalyst, todayYmdSa, nextRunFromFrequency } = require("../utils/dateUtils");
-const { checkoutForSubscription } = require("../services/checkout");
+const {
+  checkoutForSubscription,
+  preparePaystackCheckout,
+  shouldUsePaystackSubscriptionCheckout,
+} = require("../services/checkout");
 const { createInvoiceForSubscription } = require("../services/invoices");
 const { parseListPagination, listMeta } = require("../utils/pagination");
 const {
@@ -148,10 +152,12 @@ function createSubscriptionsRouter() {
 
       let paystack_checkout;
       try {
-        paystack_checkout = await checkoutForSubscription(req, { ...sub, ROWID: sub.ROWID });
-        if (!paystack_checkout?.paystack_subscription_checkout) {
-          throw new Error("Paystack recurring checkout could not be prepared");
-        }
+        paystack_checkout = await preparePaystackCheckout(req, {
+          client,
+          plan,
+          sub: { ...sub, ROWID: sub.ROWID },
+          usePaystackSubscription: shouldUsePaystackSubscriptionCheckout(sub),
+        });
       } catch (checkoutErr) {
         await deleteRow(req, "subscriptions", sub.ROWID).catch(() => {});
         if (invoice?.ROWID) {

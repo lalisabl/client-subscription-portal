@@ -6,6 +6,38 @@ const { createInvoiceForSubscription } = require("./invoices");
 const { initializeTransaction } = require("./paystack");
 const { ensurePaystackPlan } = require("./paystackSubscriptions");
 
+function mintPaymentReference(invoice) {
+  const id = safeStr(invoice?.ROWID) || "new";
+  return `inv-${id}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** Validates Paystack recurring checkout can be built — does not call Paystack initialize (avoids duplicate references). */
+async function preparePaystackCheckout(req, { client, plan: planIn, sub, usePaystackSubscription = false }) {
+  let plan = planIn;
+  if (!client) throw new Error("Client missing");
+  const email = safeStr(client.email);
+  if (!email) throw new Error("Client email is required for online payment");
+
+  let planCode = "";
+  if (usePaystackSubscription && plan) {
+    planCode = safeStr(plan.paystack_plan_code);
+    if (!planCode) {
+      planCode = await ensurePaystackPlan(req, plan);
+      plan = await findByRowId(req, "plans", plan.ROWID);
+    }
+  }
+
+  if (usePaystackSubscription && !planCode) {
+    throw new Error("Paystack recurring checkout could not be prepared (missing plan code)");
+  }
+
+  return {
+    paystack_subscription_checkout: !!usePaystackSubscription && !!planCode,
+    paystack_plan_code: planCode || undefined,
+    plan_name: plan?.name,
+  };
+}
+
 async function buildPaystackCheckout(
   req,
   { invoice, client, plan: planIn, sub, returnPath, usePaystackSubscription = false },
@@ -16,9 +48,9 @@ async function buildPaystackCheckout(
   if (!email) throw new Error("Client email is required for online payment");
 
   const portalBase = safeStr(process.env.PORTAL_BASE_URL || "http://localhost:5173").replace(/\/+$/, "");
-  const reference = safeStr(invoice.m_payment_id) || `inv-${invoice.ROWID}-${Date.now()}`;
+  const reference = mintPaymentReference(invoice);
 
-  if (invoice.ROWID && safeStr(invoice.m_payment_id) !== reference) {
+  if (invoice.ROWID) {
     await updateRow(req, "invoices", invoice.ROWID, { m_payment_id: reference });
   }
 
@@ -115,6 +147,8 @@ async function checkoutForInvoice(req, invoice) {
 }
 
 module.exports = {
+  mintPaymentReference,
+  preparePaystackCheckout,
   buildPaystackCheckout,
   checkoutForSubscription,
   checkoutForInvoice,

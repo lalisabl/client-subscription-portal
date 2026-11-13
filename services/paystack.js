@@ -43,7 +43,11 @@ async function paystackRequest(method, path, body = null) {
     throw new Error(`Paystack API invalid JSON: ${text.slice(0, 300)}`);
   }
   if (!res.ok || json.status === false) {
-    throw new Error(safeStr(json.message) || `Paystack ${method} ${path} failed`);
+    const msg = safeStr(json.message) || `Paystack ${method} ${path} failed`;
+    if (/duplicate transaction reference/i.test(msg)) {
+      throw new Error("Duplicate Transaction Reference — try Pay with Paystack again (a new reference is generated each time).");
+    }
+    throw new Error(msg);
   }
   return json;
 }
