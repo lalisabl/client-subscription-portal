@@ -13,6 +13,7 @@ const {
   fetchSubscription,
   fetchCustomer,
   listSubscriptions,
+  listSubscriptionsScanByCustomerEmail,
 } = require("./paystack");
 
 function frequencyToPaystackInterval(frequency) {
@@ -94,6 +95,39 @@ function extractSubscriptionFromPaystackPayload(data) {
   return null;
 }
 
+function subscriptionMatchesPortalPlan(item, plan, planCode, sub) {
+  const itemPlanCode = safeStr(item.plan?.plan_code);
+  const itemPlanName = safeStr(item.plan?.name).toLowerCase();
+  const portalPlanName = safeStr(plan?.name).toLowerCase();
+  if (planCode && itemPlanCode === planCode) return true;
+  if (portalPlanName && itemPlanName && itemPlanName === portalPlanName) return true;
+  const itemAmt = Math.round(Number(item.amount));
+  const subAmt = centsFromStore(sub?.amount_cents || plan?.amount_cents);
+  if (subAmt > 0 && itemAmt === subAmt) return true;
+  if (!planCode) return true;
+  return false;
+}
+
+async function listSubscriptionsForClientEmail(email) {
+  let list = [];
+  try {
+    const customer = await fetchCustomer(email);
+    const customerId = customer?.id;
+    if (customerId != null) {
+      list = await listSubscriptions({ customer: customerId, perPage: 50 });
+    }
+    if (!list.length && safeStr(customer?.customer_code)) {
+      list = await listSubscriptions({ customer: customer.customer_code, perPage: 50 });
+    }
+  } catch (err) {
+    console.error("paystack_customer_lookup_failed", email, err?.message || err);
+  }
+  if (!list.length) {
+    list = await listSubscriptionsScanByCustomerEmail(email, { maxPages: 6, perPage: 50 });
+  }
+  return list;
+}
+
 async function findPaystackSubscriptionForPortalSub(req, sub) {
   const existingCode = safeStr(sub.paystack_subscription_code);
   if (existingCode) {
@@ -112,24 +146,28 @@ async function findPaystackSubscriptionForPortalSub(req, sub) {
 
   let list = [];
   try {
-    try {
-      const customer = await fetchCustomer(email);
-      const customerKey = safeStr(customer.customer_code) || email;
-      list = await listSubscriptions({ customer: customerKey, perPage: 50 });
-    } catch {
-      list = await listSubscriptions({ perPage: 100 });
-    }
+    list = await listSubscriptionsForClientEmail(email);
   } catch (err) {
     console.error("paystack_list_subscriptions_failed", err?.message || err);
     return null;
   }
 
-  const filtered = list.filter((item) => {
-    if (planCode && safeStr(item.plan?.plan_code) !== planCode) return false;
+  if (!list.length) {
+    console.warn("paystack_no_subs_for_email", email, "plan", planCode || plan?.name);
+    return null;
+  }
+
+  const notEnded = (item) => {
     const st = safeStr(item.status).toLowerCase();
-    if (st === "complete" || st === "cancelled" || st === "canceled") return false;
-    return true;
-  });
+    return st !== "complete" && st !== "cancelled" && st !== "canceled";
+  };
+
+  let filtered = list.filter(
+    (item) => notEnded(item) && subscriptionMatchesPortalPlan(item, plan, planCode, sub),
+  );
+  if (!filtered.length) {
+    filtered = list.filter((item) => notEnded(item));
+  }
 
   filtered.sort((a, b) => {
     const rank = (s) => {
@@ -166,6 +204,16 @@ async function resolveAndPersistPaystackSubscriptionLink(req, sub) {
   if (auth) updates.paystack_authorization_code = auth;
   const nextPay = isoToYmd(remote.next_payment_date);
   if (nextPay) updates.next_run_date = nextPay;
+
+  const linkedCode = safeStr(updates.paystack_subscription_code);
+  if (linkedCode && !safeStr(updates.paystack_email_token)) {
+    try {
+      const full = await fetchSubscription(linkedCode);
+      updates.paystack_email_token = safeStr(full.email_token);
+    } catch (err) {
+      console.error("paystack_fetch_sub_for_token", linkedCode, err?.message || err);
+    }
+  }
 
   if (updates.paystack_subscription_code || updates.paystack_email_token) {
     await updateRow(req, "subscriptions", sub.ROWID, updates);

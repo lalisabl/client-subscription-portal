@@ -207,6 +207,22 @@ async function listSubscriptions(query = {}) {
   return json.data || [];
 }
 
+async function listSubscriptionsScanByCustomerEmail(email, { maxPages = 5, perPage = 50 } = {}) {
+  const target = safeStr(email).toLowerCase();
+  if (!target) return [];
+  const out = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const rows = await listSubscriptions({ page, perPage });
+    if (!rows.length) break;
+    for (const row of rows) {
+      const rowEmail = safeStr(row.customer?.email).toLowerCase();
+      if (rowEmail === target) out.push(row);
+    }
+    if (rows.length < perPage) break;
+  }
+  return out;
+}
+
 module.exports = {
   isTestMode,
   getSecretKey,
@@ -224,4 +240,5 @@ module.exports = {
   fetchPlan,
   fetchCustomer,
   listSubscriptions,
+  listSubscriptionsScanByCustomerEmail,
 };

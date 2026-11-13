@@ -284,7 +284,16 @@ function createSubscriptionsRouter() {
     try {
       let sub = await findByRowId(req, "subscriptions", req.params.id);
       if (!sub) return res.status(404).json({ ok: false, error: "Subscription not found" });
+      const manualCode = safeStr(req.body?.paystack_subscription_code);
+      if (manualCode) {
+        await updateRow(req, "subscriptions", sub.ROWID, {
+          paystack_subscription_code: manualCode,
+          updated_at: nowUtcForCatalyst(),
+        });
+        sub = await findByRowId(req, "subscriptions", req.params.id);
+      }
       sub = await resolveAndPersistPaystackSubscriptionLink(req, sub);
+      const alreadyCancelled = safeStr(sub.status).toLowerCase() === "cancelled";
       let paystack = { skipped: true };
       try {
         paystack = await cancelPaystackSubscriptionRemote(req, sub);
@@ -296,23 +305,19 @@ function createSubscriptionsRouter() {
           subscription: await findByRowId(req, "subscriptions", sub.ROWID),
         });
       }
-      if (paystack.skipped && safeStr(sub.paystack_subscription_code)) {
-        return res.status(502).json({
-          ok: false,
-          error:
-            "Paystack subscription linked in portal but disable was skipped (missing email token). Try Sync Paystack or cancel in Paystack dashboard.",
-          paystack,
-        });
-      }
       if (paystack.skipped) {
         return res.status(502).json({
           ok: false,
-          error:
-            "No Paystack subscription found for this client/plan — payment may be one-off only, or link failed. Cancel in Paystack manually if needed.",
+          error: alreadyCancelled
+            ? "Could not disable Paystack subscription. Use Retry Paystack cancel with code SUB_… from the dashboard, or cancel in Paystack."
+            : "No Paystack subscription found for this client/plan — check client email matches Paystack and plan is linked.",
           paystack,
+          subscription: await findByRowId(req, "subscriptions", sub.ROWID),
         });
       }
-      await updateRow(req, "subscriptions", sub.ROWID, { status: "cancelled", updated_at: nowUtcForCatalyst() });
+      if (!alreadyCancelled) {
+        await updateRow(req, "subscriptions", sub.ROWID, { status: "cancelled", updated_at: nowUtcForCatalyst() });
+      }
       await logActivity(req, {
         actor_type: req.user.role,
         actor_email: req.user.email,
@@ -337,10 +342,19 @@ function createSubscriptionsRouter() {
   /** Staff: align portal with Paystack (re-disable if portal cancelled but Paystack still active). */
   router.post("/api/subscriptions/:id/paystack-sync", requireAuth, requireStaff, async (req, res) => {
     try {
-      const sub = await findByRowId(req, "subscriptions", req.params.id);
+      let sub = await findByRowId(req, "subscriptions", req.params.id);
       if (!sub) return res.status(404).json({ ok: false, error: "Subscription not found" });
+      const manualCode = safeStr(req.body?.paystack_subscription_code);
+      if (manualCode) {
+        await updateRow(req, "subscriptions", sub.ROWID, {
+          paystack_subscription_code: manualCode,
+          updated_at: nowUtcForCatalyst(),
+        });
+        sub = await findByRowId(req, "subscriptions", req.params.id);
+      }
+      sub = await resolveAndPersistPaystackSubscriptionLink(req, sub);
       const result = await syncSubscriptionWithPaystack(req, sub, { retryDisable: true });
-      return res.json({ ok: true, ...result });
+      return res.json({ ok: true, ...result, subscription: await findByRowId(req, "subscriptions", sub.ROWID) });
     } catch (err) {
       return res.status(502).json({ ok: false, error: String(err?.message || err) });
     }
