@@ -5,33 +5,85 @@ const { findMany, findByRowId, escapeZcql } = require("../catalyst/datastore");
 const { requireAuth, isStaff, safeStr } = require("../utils/authUtils");
 const { formatZAR } = require("../services/invoices");
 
-function toneForAction(action) {
-  const a = safeStr(action).toLowerCase();
-  if (a.includes("fail") || a.includes("cancel")) return "warning";
-  if (a.includes("payment") || a.includes("paid") || a.includes("complete")) return "success";
-  return "info";
-}
-
-function hrefForEntity(entityType, entityRowid) {
-  const id = safeStr(entityRowid);
-  if (!id) return "";
-  const t = safeStr(entityType).toLowerCase();
-  if (t === "invoice") return `/invoices/${id}`;
-  if (t === "subscription") return `/subscriptions/${id}`;
-  if (t === "client") return `/clients/${id}`;
-  return "";
-}
-
+/** Staff bell: client-facing events only (payments, invoices needing client action) — not admin CRUD. */
 async function staffNotifications(req) {
-  const rows = await findMany(req, "activity_log", "", "CREATEDTIME DESC", 25, 0);
-  return rows.map((a) => ({
-    id: `activity-${a.ROWID}`,
-    title: safeStr(a.summary) || safeStr(a.action) || "Activity",
-    message: safeStr(a.actor_email) || safeStr(a.actor_type),
-    at: safeStr(a.created_at || a.CREATEDTIME),
-    tone: toneForAction(a.action),
-    href: hrefForEntity(a.entity_type, a.entity_rowid),
-  }));
+  const items = [];
+  const clientCache = new Map();
+  const invoiceCache = new Map();
+
+  async function clientName(clientRowid) {
+    const key = String(clientRowid || "");
+    if (!key) return "Client";
+    if (clientCache.has(key)) return clientCache.get(key);
+    const row = await findByRowId(req, "clients", key);
+    const name = safeStr(row?.name) || safeStr(row?.contact_person) || "Client";
+    clientCache.set(key, name);
+    return name;
+  }
+
+  async function invoiceBrief(invoiceRowid) {
+    const key = String(invoiceRowid || "");
+    if (!key) return null;
+    if (invoiceCache.has(key)) return invoiceCache.get(key);
+    const row = await findByRowId(req, "invoices", key);
+    const brief = row ? { ROWID: row.ROWID, invoice_number: row.invoice_number } : null;
+    invoiceCache.set(key, brief);
+    return brief;
+  }
+
+  const [paid, failed] = await Promise.all([
+    findMany(req, "payments", "status='complete'", "CREATEDTIME DESC", 20, 0),
+    findMany(req, "payments", "status='failed'", "CREATEDTIME DESC", 10, 0),
+  ]);
+
+  for (const p of paid) {
+    const name = await clientName(p.client_rowid);
+    const inv = await invoiceBrief(p.invoice_rowid);
+    items.push({
+      id: `staff-payment-${p.ROWID}`,
+      title: `${name} paid online`,
+      message: inv ? `${inv.invoice_number} · ${formatZAR(p.amount_cents)}` : formatZAR(p.amount_cents),
+      at: safeStr(p.created_at || p.CREATEDTIME),
+      tone: "success",
+      href: inv ? `/invoices/${inv.ROWID}` : p.invoice_rowid ? `/invoices/${p.invoice_rowid}` : "",
+    });
+  }
+
+  for (const p of failed) {
+    const name = await clientName(p.client_rowid);
+    const inv = await invoiceBrief(p.invoice_rowid);
+    items.push({
+      id: `staff-payment-failed-${p.ROWID}`,
+      title: `${name} — payment failed`,
+      message: inv ? `${inv.invoice_number} · ${formatZAR(p.amount_cents)}` : formatZAR(p.amount_cents),
+      at: safeStr(p.created_at || p.CREATEDTIME),
+      tone: "warning",
+      href: inv ? `/invoices/${inv.ROWID}` : "",
+    });
+  }
+
+  const openInvoices = await findMany(
+    req,
+    "invoices",
+    `status='sent' OR status='failed' OR status='overdue'`,
+    "due_date ASC",
+    15,
+    0
+  );
+  for (const inv of openInvoices) {
+    const name = await clientName(inv.client_rowid);
+    items.push({
+      id: `staff-invoice-open-${inv.ROWID}`,
+      title: `${name} — invoice awaiting payment`,
+      message: `${inv.invoice_number} · due ${inv.due_date || "—"} · ${formatZAR(inv.total_cents)}`,
+      at: safeStr(inv.CREATEDTIME || inv.issue_date),
+      tone: "warning",
+      href: `/invoices/${inv.ROWID}`,
+    });
+  }
+
+  items.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  return items.slice(0, 25);
 }
 
 async function clientNotifications(req, clientRowid) {
