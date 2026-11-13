@@ -1,7 +1,7 @@
 "use strict";
 
 const express = require("express");
-const { findOne, updateRow, escapeZcql } = require("../catalyst/datastore");
+const { findOne, findByRowId, updateRow, escapeZcql } = require("../catalyst/datastore");
 const { requireAuth, safeStr } = require("../utils/authUtils");
 const { verifyTransaction, verifyWebhookSignature } = require("../services/paystack");
 const {
@@ -15,6 +15,7 @@ const {
   syncPaystackSubscriptionStatus,
   applyPaystackSubscriptionSnapshot,
   findSubscriptionForPaystackEvent,
+  resolveAndPersistPaystackSubscriptionLink,
 } = require("../services/paystackSubscriptions");
 
 async function processChargeEvent(req, event, data, signatureValid, eventRow) {
@@ -208,6 +209,10 @@ function createPaystackRouter() {
           channel: data.channel,
           rawPayload: data,
         });
+        if (invoice.subscription_rowid) {
+          const sub = await findByRowId(req, "subscriptions", invoice.subscription_rowid);
+          if (sub) await resolveAndPersistPaystackSubscriptionLink(req, sub);
+        }
       }
 
       return res.json({

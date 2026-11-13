@@ -10,6 +10,9 @@ const {
   disableSubscription,
   enableSubscription,
   fetchPlan,
+  fetchSubscription,
+  fetchCustomer,
+  listSubscriptions,
 } = require("./paystack");
 
 function frequencyToPaystackInterval(frequency) {
@@ -74,6 +77,101 @@ function metaSubscriptionRowId(data) {
 function metaInvoiceRowId(data) {
   const meta = parseMetadata(data);
   return safeStr(meta.invoice_rowid);
+}
+
+function extractSubscriptionFromPaystackPayload(data) {
+  if (!data || typeof data !== "object") return null;
+  if (data.subscription && typeof data.subscription === "object") return data.subscription;
+  const code = safeStr(data.subscription_code);
+  if (code) {
+    return {
+      subscription_code: code,
+      email_token: safeStr(data.email_token),
+      status: data.status,
+      next_payment_date: data.next_payment_date,
+    };
+  }
+  return null;
+}
+
+async function findPaystackSubscriptionForPortalSub(req, sub) {
+  const existingCode = safeStr(sub.paystack_subscription_code);
+  if (existingCode) {
+    try {
+      return await fetchSubscription(existingCode);
+    } catch (err) {
+      console.error("paystack_fetch_sub_by_code", existingCode, err?.message || err);
+    }
+  }
+
+  const client = await findByRowId(req, "clients", sub.client_rowid);
+  const plan = sub.plan_rowid ? await findByRowId(req, "plans", sub.plan_rowid) : null;
+  const email = safeStr(client?.email);
+  const planCode = safeStr(plan?.paystack_plan_code);
+  if (!email) return null;
+
+  let list = [];
+  try {
+    try {
+      const customer = await fetchCustomer(email);
+      const customerKey = safeStr(customer.customer_code) || email;
+      list = await listSubscriptions({ customer: customerKey, perPage: 50 });
+    } catch {
+      list = await listSubscriptions({ perPage: 100 });
+    }
+  } catch (err) {
+    console.error("paystack_list_subscriptions_failed", err?.message || err);
+    return null;
+  }
+
+  const filtered = list.filter((item) => {
+    if (planCode && safeStr(item.plan?.plan_code) !== planCode) return false;
+    const st = safeStr(item.status).toLowerCase();
+    if (st === "complete" || st === "cancelled" || st === "canceled") return false;
+    return true;
+  });
+
+  filtered.sort((a, b) => {
+    const rank = (s) => {
+      const x = safeStr(s?.status).toLowerCase();
+      if (x === "active") return 4;
+      if (x === "non-renewing" || x === "non_renewing") return 3;
+      if (x === "attention") return 2;
+      return 1;
+    };
+    const d = rank(b) - rank(a);
+    if (d !== 0) return d;
+    return String(b.createdAt || b.CREATEDTIME || "").localeCompare(String(a.createdAt || a.CREATEDTIME || ""));
+  });
+
+  return filtered[0] || null;
+}
+
+/** Link portal row to Paystack SUB_… when webhook/verify omitted subscription fields. */
+async function resolveAndPersistPaystackSubscriptionLink(req, sub) {
+  if (!sub) return null;
+  const code = safeStr(sub.paystack_subscription_code);
+  const token = safeStr(sub.paystack_email_token);
+  if (code && token) return sub;
+
+  const remote = await findPaystackSubscriptionForPortalSub(req, sub);
+  if (!remote) return sub;
+
+  const updates = {
+    updated_at: nowUtcForCatalyst(),
+    paystack_subscription_code: safeStr(remote.subscription_code) || code,
+    paystack_email_token: safeStr(remote.email_token) || token,
+  };
+  const auth = safeStr(remote.authorization?.authorization_code || remote.authorization_code);
+  if (auth) updates.paystack_authorization_code = auth;
+  const nextPay = isoToYmd(remote.next_payment_date);
+  if (nextPay) updates.next_run_date = nextPay;
+
+  if (updates.paystack_subscription_code || updates.paystack_email_token) {
+    await updateRow(req, "subscriptions", sub.ROWID, updates);
+    return findByRowId(req, "subscriptions", sub.ROWID);
+  }
+  return sub;
 }
 
 /**
@@ -287,6 +385,7 @@ async function ensurePaystackSubscriptionTokens(req, sub) {
 }
 
 async function cancelPaystackSubscriptionRemote(req, sub) {
+  sub = await resolveAndPersistPaystackSubscriptionLink(req, sub);
   const { code, token } = await ensurePaystackSubscriptionTokens(req, sub);
   if (!code) return { skipped: true, reason: "No Paystack subscription linked" };
   if (!token) {
@@ -297,6 +396,7 @@ async function cancelPaystackSubscriptionRemote(req, sub) {
 }
 
 async function resumePaystackSubscriptionRemote(req, sub) {
+  sub = await resolveAndPersistPaystackSubscriptionLink(req, sub);
   const { code, token } = await ensurePaystackSubscriptionTokens(req, sub);
   if (!code) return { skipped: true, reason: "No Paystack subscription linked" };
   if (!token) throw new Error("Paystack subscription token missing");
@@ -308,6 +408,7 @@ async function resumePaystackSubscriptionRemote(req, sub) {
  * Fetch Paystack subscription; optionally re-run disable when portal is cancelled/paused but Paystack still renews.
  */
 async function syncSubscriptionWithPaystack(req, sub, { retryDisable = true } = {}) {
+  sub = await resolveAndPersistPaystackSubscriptionLink(req, sub);
   const code = safeStr(sub.paystack_subscription_code);
   if (!code) return { skipped: true, reason: "No Paystack subscription linked" };
 
@@ -378,6 +479,9 @@ module.exports = {
   metaSubscriptionRowId,
   metaInvoiceRowId,
   parseMetadata,
+  extractSubscriptionFromPaystackPayload,
+  findPaystackSubscriptionForPortalSub,
+  resolveAndPersistPaystackSubscriptionLink,
   preparePaystackForNewSubscription,
   ensurePaystackPlan,
   findSubscriptionForPaystackEvent,

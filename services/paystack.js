@@ -191,6 +191,22 @@ async function fetchPlan(planCode) {
   return json.data || {};
 }
 
+async function fetchCustomer(emailOrCode) {
+  const id = encodeURIComponent(safeStr(emailOrCode));
+  const json = await paystackRequest("GET", `/customer/${id}`);
+  return json.data || {};
+}
+
+async function listSubscriptions(query = {}) {
+  const qs = new URLSearchParams();
+  Object.entries(query).forEach(([key, val]) => {
+    if (val != null && val !== "") qs.set(key, String(val));
+  });
+  const path = qs.toString() ? `/subscription?${qs.toString()}` : "/subscription";
+  const json = await paystackRequest("GET", path);
+  return json.data || [];
+}
+
 module.exports = {
   isTestMode,
   getSecretKey,
@@ -206,4 +222,6 @@ module.exports = {
   enableSubscription,
   fetchSubscription,
   fetchPlan,
+  fetchCustomer,
+  listSubscriptions,
 };

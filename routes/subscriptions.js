@@ -26,6 +26,7 @@ const {
   cancelPaystackSubscriptionRemote,
   resumePaystackSubscriptionRemote,
   syncSubscriptionWithPaystack,
+  resolveAndPersistPaystackSubscriptionLink,
 } = require("../services/paystackSubscriptions");
 
 function createSubscriptionsRouter() {
@@ -281,14 +282,35 @@ function createSubscriptionsRouter() {
 
   router.post("/api/subscriptions/:id/cancel", requireAuth, requireStaff, async (req, res) => {
     try {
-      const sub = await findByRowId(req, "subscriptions", req.params.id);
+      let sub = await findByRowId(req, "subscriptions", req.params.id);
       if (!sub) return res.status(404).json({ ok: false, error: "Subscription not found" });
+      sub = await resolveAndPersistPaystackSubscriptionLink(req, sub);
       let paystack = { skipped: true };
       try {
         paystack = await cancelPaystackSubscriptionRemote(req, sub);
       } catch (psErr) {
         console.error("paystack_cancel_failed", psErr);
-        return res.status(502).json({ ok: false, error: String(psErr?.message || psErr) });
+        return res.status(502).json({
+          ok: false,
+          error: String(psErr?.message || psErr),
+          subscription: await findByRowId(req, "subscriptions", sub.ROWID),
+        });
+      }
+      if (paystack.skipped && safeStr(sub.paystack_subscription_code)) {
+        return res.status(502).json({
+          ok: false,
+          error:
+            "Paystack subscription linked in portal but disable was skipped (missing email token). Try Sync Paystack or cancel in Paystack dashboard.",
+          paystack,
+        });
+      }
+      if (paystack.skipped) {
+        return res.status(502).json({
+          ok: false,
+          error:
+            "No Paystack subscription found for this client/plan — payment may be one-off only, or link failed. Cancel in Paystack manually if needed.",
+          paystack,
+        });
       }
       await updateRow(req, "subscriptions", sub.ROWID, { status: "cancelled", updated_at: nowUtcForCatalyst() });
       await logActivity(req, {
